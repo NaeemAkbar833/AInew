@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 
 interface StudentRepository {
   suspend fun getStudentsByClassId(classId: String): Result<List<Student>>
+  suspend fun getStudentById(studentId: String): Result<Student?>
   suspend fun addStudent(
     classId: String,
     name: String,
@@ -50,6 +51,34 @@ class SupabaseStudentRepository(
         Result.success(students)
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching students for class $classId", e)
+        Result.failure(e)
+      }
+    }
+
+  override suspend fun getStudentById(studentId: String): Result<Student?> =
+    withContext(Dispatchers.IO) {
+      try {
+        if (!SupabaseClientProvider.isConfigured()) {
+          return@withContext Result.failure(
+            IllegalStateException("Supabase is not configured yet.")
+          )
+        }
+
+        val teacherId = authRepository.getCurrentUserId()
+          ?: return@withContext Result.failure(IllegalStateException("Teacher is not authenticated."))
+
+        val student = SupabaseClientProvider.client.postgrest["students"]
+          .select {
+            filter {
+              eq("id", studentId)
+              eq("teacher_id", teacherId)
+            }
+          }
+          .decodeSingleOrNull<Student>()
+
+        Result.success(student)
+      } catch (e: Exception) {
+        Log.e(TAG, "Error fetching student with id $studentId", e)
         Result.failure(e)
       }
     }

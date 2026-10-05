@@ -1,20 +1,26 @@
 package com.example
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.model.ClassRoom
 import com.example.data.model.ClassTiming
 import com.example.data.model.Exam
 import com.example.data.model.ExamType
 import com.example.data.model.Student
+import com.example.data.model.StudentPaper
+import com.example.data.model.StudentPaperPage
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.ClassRepository
 import com.example.data.repository.ExamRepository
+import com.example.data.repository.PaperRepository
 import com.example.data.repository.StudentRepository
 import com.example.ui.auth.AuthViewModel
 import com.example.ui.classes.ClassViewModel
 import com.example.ui.exam.ExamViewModel
 import com.example.ui.home.HomeViewModel
+import com.example.ui.paper.ScanPaperViewModel
+import com.example.ui.paper.StudentDetailViewModel
 import com.example.ui.student.StudentViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
@@ -188,6 +194,14 @@ class FakeStudentRepository(
     }
   }
 
+  override suspend fun getStudentById(studentId: String): Result<Student?> {
+    return if (shouldFail) {
+      Result.failure(Exception("Failed to fetch student"))
+    } else {
+      Result.success(students.firstOrNull { it.id == studentId })
+    }
+  }
+
   override suspend fun addStudent(
     classId: String,
     name: String,
@@ -225,6 +239,73 @@ class FakeStudentRepository(
         Result.failure(IllegalStateException("Student not found"))
       }
     }
+  }
+}
+
+class FakePaperRepository(
+  initialPapers: List<StudentPaper> = emptyList(),
+  var shouldFail: Boolean = false,
+) : PaperRepository {
+  private val papers = initialPapers.toMutableList()
+  val deletedStoragePaths = mutableListOf<String>()
+
+  override suspend fun getPapersByStudentId(studentId: String): Result<List<StudentPaper>> {
+    return if (shouldFail) {
+      Result.failure(Exception("Failed to fetch papers"))
+    } else {
+      Result.success(papers.filter { it.studentId == studentId })
+    }
+  }
+
+  override suspend fun createPaperWithPages(
+    context: Context,
+    studentId: String,
+    classId: String,
+    pageUris: List<Uri>,
+    onProgress: (current: Int, total: Int) -> Unit,
+  ): Result<StudentPaper> {
+    return if (shouldFail) {
+      Result.failure(Exception("Failed to upload paper"))
+    } else {
+      val paperId = "paper-${papers.size + 1}"
+      val pages = pageUris.mapIndexed { idx, _ ->
+        onProgress(idx + 1, pageUris.size)
+        StudentPaperPage(
+          id = "page-${idx + 1}",
+          paperId = paperId,
+          studentId = studentId,
+          teacherId = "user-123",
+          pageNumber = idx + 1,
+          storagePath = "user-123/$classId/$studentId/$paperId/page_${idx + 1}.jpg",
+        )
+      }
+      val newPaper = StudentPaper(
+        id = paperId,
+        studentId = studentId,
+        classId = classId,
+        teacherId = "user-123",
+        totalPages = pageUris.size,
+        status = "scanned",
+        createdAt = "2026-10-05T00:00:00Z",
+        pages = pages,
+      )
+      papers.add(0, newPaper)
+      Result.success(newPaper)
+    }
+  }
+
+  override suspend fun deletePaper(paper: StudentPaper): Result<Unit> {
+    return if (shouldFail) {
+      Result.failure(Exception("Failed to delete paper"))
+    } else {
+      papers.removeAll { it.id == paper.id }
+      deletedStoragePaths.addAll(paper.pages.map { it.storagePath })
+      Result.success(Unit)
+    }
+  }
+
+  override suspend fun getSignedPageUrl(storagePath: String, expiresInSeconds: Long): Result<String> {
+    return Result.success("https://signed.url/$storagePath")
   }
 }
 
@@ -592,5 +673,95 @@ class ExampleRobolectricTest {
     studentViewModel.loadClassAndStudents("class-A")
     assertEquals(1, studentViewModel.uiState.value.students.size)
     assertEquals("John in A", studentViewModel.uiState.value.students.first().name)
+  }
+
+  @Test
+  fun `verify ScanPaperViewModel multi-page management and renumbering`() = runTest {
+    val fakePaperRepo = FakePaperRepository()
+    val viewModel = ScanPaperViewModel(fakePaperRepo)
+
+    assertEquals(0, viewModel.uiState.value.pages.size)
+
+    // Add 3 pages
+    val uri1 = Uri.parse("content://media/external/images/media/1")
+    val uri2 = Uri.parse("content://media/external/images/media/2")
+    val uri3 = Uri.parse("content://media/external/images/media/3")
+
+    viewModel.addPage(uri1)
+    viewModel.addPages(listOf(uri2, uri3))
+
+    assertEquals(3, viewModel.uiState.value.pages.size)
+    assertEquals(1, viewModel.uiState.value.pages[0].pageNumber)
+    assertEquals(2, viewModel.uiState.value.pages[1].pageNumber)
+    assertEquals(3, viewModel.uiState.value.pages[2].pageNumber)
+
+    // Remove page 2 -> check re-indexing
+    val page2Id = viewModel.uiState.value.pages[1].id
+    viewModel.removePage(page2Id)
+
+    assertEquals(2, viewModel.uiState.value.pages.size)
+    assertEquals(1, viewModel.uiState.value.pages[0].pageNumber)
+    assertEquals(2, viewModel.uiState.value.pages[1].pageNumber)
+    assertEquals(uri3, viewModel.uiState.value.pages[1].uri)
+  }
+
+  @Test
+  fun `verify ScanPaperViewModel upload failure preserves pages in memory`() = runTest {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val fakePaperRepo = FakePaperRepository(shouldFail = true)
+    val viewModel = ScanPaperViewModel(fakePaperRepo)
+
+    val uri1 = Uri.parse("content://media/external/images/media/1")
+    viewModel.addPage(uri1)
+
+    var successCalled = false
+    viewModel.finishScan(context, "student-1", "class-1", onSuccess = { successCalled = true })
+
+    assertFalse(successCalled)
+    assertFalse(viewModel.uiState.value.isUploading)
+    assertEquals("Failed to upload paper", viewModel.uiState.value.uploadError)
+    // Pages must remain intact so teacher doesn't lose them
+    assertEquals(1, viewModel.uiState.value.pages.size)
+  }
+
+  @Test
+  fun `verify StudentDetailViewModel loadPapers and deletePaper with storage cleanup`() = runTest {
+    val student = Student(id = "student-1", classId = "class-1", teacherId = "user-123", name = "Zaid Ali", fatherName = "Ali", rollNumber = "CS-05")
+    val classRoom = ClassRoom(id = "class-1", examId = "exam-1", teacherId = "user-123", session = "2022-2026", semester = "4th", timing = "Morning", subjectName = "Database", totalMarks = 100)
+    val paper1 = StudentPaper(
+      id = "paper-1",
+      studentId = "student-1",
+      classId = "class-1",
+      teacherId = "user-123",
+      totalPages = 2,
+      pages = listOf(
+        StudentPaperPage(id = "page-1", paperId = "paper-1", studentId = "student-1", teacherId = "user-123", pageNumber = 1, storagePath = "user-123/class-1/student-1/paper-1/page_1.jpg"),
+        StudentPaperPage(id = "page-2", paperId = "paper-1", studentId = "student-1", teacherId = "user-123", pageNumber = 2, storagePath = "user-123/class-1/student-1/paper-1/page_2.jpg"),
+      )
+    )
+
+    val fakeStudentRepo = FakeStudentRepository(initialStudents = listOf(student))
+    val fakeClassRepo = FakeClassRepository(initialClasses = listOf(classRoom))
+    val fakePaperRepo = FakePaperRepository(initialPapers = listOf(paper1))
+
+    val viewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo)
+
+    viewModel.loadStudentAndPapers("student-1")
+
+    assertEquals("Zaid Ali", viewModel.uiState.value.student?.name)
+    assertEquals("Database", viewModel.uiState.value.classRoom?.subjectName)
+    assertEquals(1, viewModel.uiState.value.papers.size)
+    assertEquals(2, viewModel.uiState.value.papers.first().totalPages)
+
+    // Delete paper
+    var deleteSuccess = false
+    viewModel.deletePaper(paper1) { deleteSuccess = true }
+
+    assertTrue(deleteSuccess)
+    assertTrue(viewModel.uiState.value.papers.isEmpty())
+    assertEquals("Paper submission deleted.", viewModel.uiState.value.feedbackMessage)
+    // Check that storage files were deleted as well
+    assertEquals(2, fakePaperRepo.deletedStoragePaths.size)
+    assertTrue(fakePaperRepo.deletedStoragePaths.contains("user-123/class-1/student-1/paper-1/page_1.jpg"))
   }
 }

@@ -16,10 +16,12 @@ import androidx.navigation.navArgument
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.ClassRepository
 import com.example.data.repository.ExamRepository
+import com.example.data.repository.PaperRepository
 import com.example.data.repository.StudentRepository
 import com.example.data.repository.SupabaseAuthRepository
 import com.example.data.repository.SupabaseClassRepository
 import com.example.data.repository.SupabaseExamRepository
+import com.example.data.repository.SupabasePaperRepository
 import com.example.data.repository.SupabaseStudentRepository
 import com.example.ui.auth.AuthViewModel
 import com.example.ui.auth.LoginScreen
@@ -31,6 +33,10 @@ import com.example.ui.exam.ExamViewModel
 import com.example.ui.exam.ExamsScreen
 import com.example.ui.home.HomeScreen
 import com.example.ui.home.HomeViewModel
+import com.example.ui.paper.ScanPaperScreen
+import com.example.ui.paper.ScanPaperViewModel
+import com.example.ui.paper.StudentDetailScreen
+import com.example.ui.paper.StudentDetailViewModel
 import com.example.ui.splash.SplashScreen
 import com.example.ui.student.ClassDetailScreen
 import com.example.ui.student.StudentViewModel
@@ -43,12 +49,17 @@ fun GradeScanNavHost(
   examRepository: ExamRepository = remember { SupabaseExamRepository(authRepository) },
   classRepository: ClassRepository = remember { SupabaseClassRepository(authRepository) },
   studentRepository: StudentRepository = remember { SupabaseStudentRepository(authRepository) },
+  paperRepository: PaperRepository = remember { SupabasePaperRepository(authRepository) },
 ) {
   val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
   val homeViewModel: HomeViewModel = viewModel { HomeViewModel(authRepository) }
   val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
   val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
   val studentViewModel: StudentViewModel = viewModel { StudentViewModel(studentRepository, classRepository) }
+  val studentDetailViewModel: StudentDetailViewModel = viewModel {
+    StudentDetailViewModel(studentRepository, classRepository, paperRepository)
+  }
+  val scanPaperViewModel: ScanPaperViewModel = viewModel { ScanPaperViewModel(paperRepository) }
 
   var isHomeCreateExamDialogOpen by remember { mutableStateOf(false) }
 
@@ -178,6 +189,50 @@ fun GradeScanNavHost(
         classId = classId,
         viewModel = studentViewModel,
         onNavigateBack = {
+          navController.popBackStack()
+        },
+        onStudentClick = { studentId ->
+          navController.navigate(Screen.StudentDetail.createRoute(studentId))
+        },
+      )
+    }
+
+    composable(
+      route = Screen.StudentDetail.route,
+      arguments = listOf(navArgument("studentId") { type = NavType.StringType }),
+    ) { backStackEntry ->
+      val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
+      StudentDetailScreen(
+        studentId = studentId,
+        viewModel = studentDetailViewModel,
+        onNavigateBack = {
+          navController.popBackStack()
+        },
+        onNavigateToScan = { sid, cid ->
+          scanPaperViewModel.clearAllPages()
+          navController.navigate(Screen.ScanPaper.createRoute(sid, cid))
+        },
+      )
+    }
+
+    composable(
+      route = Screen.ScanPaper.route,
+      arguments = listOf(
+        navArgument("studentId") { type = NavType.StringType },
+        navArgument("classId") { type = NavType.StringType },
+      ),
+    ) { backStackEntry ->
+      val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
+      val classId = backStackEntry.arguments?.getString("classId") ?: ""
+      ScanPaperScreen(
+        studentId = studentId,
+        classId = classId,
+        viewModel = scanPaperViewModel,
+        onNavigateBack = {
+          navController.popBackStack()
+        },
+        onScanFinished = {
+          studentDetailViewModel.loadStudentAndPapers(studentId)
           navController.popBackStack()
         },
       )

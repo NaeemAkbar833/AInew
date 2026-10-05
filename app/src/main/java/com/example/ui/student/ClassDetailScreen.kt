@@ -1,6 +1,7 @@
 package com.example.ui.student
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,6 +70,7 @@ fun ClassDetailScreen(
   classId: String,
   viewModel: StudentViewModel,
   onNavigateBack: () -> Unit,
+  onStudentClick: (String) -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsState()
@@ -485,6 +487,9 @@ fun ClassDetailScreen(
                 uiState.students.forEach { student ->
                   StudentCard(
                     student = student,
+                    onClick = {
+                      student.id?.let { sid -> onStudentClick(sid) }
+                    },
                     onDeleteClick = {
                       studentToDelete = student
                     },
@@ -502,6 +507,7 @@ fun ClassDetailScreen(
 @Composable
 fun StudentCard(
   student: Student,
+  onClick: () -> Unit = {},
   onDeleteClick: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -511,6 +517,7 @@ fun StudentCard(
     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     modifier = modifier
       .fillMaxWidth()
+      .clickable(onClick = onClick)
       .testTag("student_card_${student.rollNumber}"),
   ) {
     Row(
