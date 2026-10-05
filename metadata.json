@@ -1,0 +1,6 @@
+{
+  "name": "GradeScan",
+  "description": "Scan handwritten student examination papers and evaluate them with OCR and AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

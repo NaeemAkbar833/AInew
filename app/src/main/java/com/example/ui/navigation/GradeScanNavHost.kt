@@ -1,0 +1,186 @@
+package com.example.ui.navigation
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.example.data.repository.AuthRepository
+import com.example.data.repository.ClassRepository
+import com.example.data.repository.ExamRepository
+import com.example.data.repository.StudentRepository
+import com.example.data.repository.SupabaseAuthRepository
+import com.example.data.repository.SupabaseClassRepository
+import com.example.data.repository.SupabaseExamRepository
+import com.example.data.repository.SupabaseStudentRepository
+import com.example.ui.auth.AuthViewModel
+import com.example.ui.auth.LoginScreen
+import com.example.ui.auth.SignUpScreen
+import com.example.ui.classes.ClassViewModel
+import com.example.ui.exam.CreateExamDialog
+import com.example.ui.exam.ExamDetailScreen
+import com.example.ui.exam.ExamViewModel
+import com.example.ui.exam.ExamsScreen
+import com.example.ui.home.HomeScreen
+import com.example.ui.home.HomeViewModel
+import com.example.ui.splash.SplashScreen
+import com.example.ui.student.ClassDetailScreen
+import com.example.ui.student.StudentViewModel
+
+@Composable
+fun GradeScanNavHost(
+  modifier: Modifier = Modifier,
+  navController: NavHostController = rememberNavController(),
+  authRepository: AuthRepository = remember { SupabaseAuthRepository() },
+  examRepository: ExamRepository = remember { SupabaseExamRepository(authRepository) },
+  classRepository: ClassRepository = remember { SupabaseClassRepository(authRepository) },
+  studentRepository: StudentRepository = remember { SupabaseStudentRepository(authRepository) },
+) {
+  val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
+  val homeViewModel: HomeViewModel = viewModel { HomeViewModel(authRepository) }
+  val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+  val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
+  val studentViewModel: StudentViewModel = viewModel { StudentViewModel(studentRepository, classRepository) }
+
+  var isHomeCreateExamDialogOpen by remember { mutableStateOf(false) }
+
+  if (isHomeCreateExamDialogOpen) {
+    CreateExamDialog(
+      onDismissRequest = { isHomeCreateExamDialogOpen = false },
+      onExamCreated = { newExam ->
+        isHomeCreateExamDialogOpen = false
+        navController.navigate(Screen.Exams.route)
+      },
+      viewModel = examViewModel,
+    )
+  }
+
+  NavHost(
+    navController = navController,
+    startDestination = Screen.Splash.route,
+    modifier = modifier,
+  ) {
+    composable(Screen.Splash.route) {
+      SplashScreen(
+        authRepository = authRepository,
+        onNavigateToHome = {
+          homeViewModel.loadTeacherInfo()
+          navController.navigate(Screen.Home.route) {
+            popUpTo(Screen.Splash.route) { inclusive = true }
+          }
+        },
+        onNavigateToLogin = {
+          navController.navigate(Screen.Login.route) {
+            popUpTo(Screen.Splash.route) { inclusive = true }
+          }
+        },
+      )
+    }
+
+    composable(Screen.Login.route) {
+      LoginScreen(
+        viewModel = authViewModel,
+        onNavigateToSignUp = {
+          authViewModel.clearError()
+          navController.navigate(Screen.SignUp.route)
+        },
+        onLoginSuccess = {
+          authViewModel.resetSuccess()
+          homeViewModel.loadTeacherInfo()
+          examViewModel.loadExams()
+          navController.navigate(Screen.Home.route) {
+            popUpTo(Screen.Login.route) { inclusive = true }
+          }
+        },
+      )
+    }
+
+    composable(Screen.SignUp.route) {
+      SignUpScreen(
+        viewModel = authViewModel,
+        onNavigateBack = {
+          authViewModel.clearError()
+          navController.popBackStack()
+        },
+        onSignUpSuccess = {
+          authViewModel.resetSuccess()
+          homeViewModel.loadTeacherInfo()
+          examViewModel.loadExams()
+          navController.navigate(Screen.Home.route) {
+            popUpTo(Screen.Login.route) { inclusive = true }
+          }
+        },
+      )
+    }
+
+    composable(Screen.Home.route) {
+      HomeScreen(
+        viewModel = homeViewModel,
+        onSignedOut = {
+          authViewModel.clearError()
+          navController.navigate(Screen.Login.route) {
+            popUpTo(Screen.Home.route) { inclusive = true }
+          }
+        },
+        onNavigateToExams = {
+          navController.navigate(Screen.Exams.route)
+        },
+        onOpenCreateExam = {
+          isHomeCreateExamDialogOpen = true
+        },
+      )
+    }
+
+    composable(Screen.Exams.route) {
+      ExamsScreen(
+        viewModel = examViewModel,
+        onNavigateBack = {
+          navController.popBackStack()
+        },
+        onExamClick = { examId ->
+          navController.navigate(Screen.ExamDetail.createRoute(examId))
+        },
+      )
+    }
+
+    composable(
+      route = Screen.ExamDetail.route,
+      arguments = listOf(navArgument("examId") { type = NavType.StringType }),
+    ) { backStackEntry ->
+      val examId = backStackEntry.arguments?.getString("examId") ?: ""
+      ExamDetailScreen(
+        examId = examId,
+        examViewModel = examViewModel,
+        classViewModel = classViewModel,
+        onNavigateBack = {
+          navController.popBackStack()
+        },
+        onClassClick = { classId ->
+          navController.navigate(Screen.ClassDetail.createRoute(classId))
+        },
+      )
+    }
+
+    composable(
+      route = Screen.ClassDetail.route,
+      arguments = listOf(navArgument("classId") { type = NavType.StringType }),
+    ) { backStackEntry ->
+      val classId = backStackEntry.arguments?.getString("classId") ?: ""
+      ClassDetailScreen(
+        classId = classId,
+        viewModel = studentViewModel,
+        onNavigateBack = {
+          navController.popBackStack()
+        },
+      )
+    }
+  }
+}
