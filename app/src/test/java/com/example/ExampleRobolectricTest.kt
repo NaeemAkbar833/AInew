@@ -13,6 +13,7 @@ import com.example.data.model.StudentPaperPage
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.ClassRepository
 import com.example.data.repository.ExamRepository
+import com.example.data.repository.OcrRepository
 import com.example.data.repository.PaperRepository
 import com.example.data.repository.StudentRepository
 import com.example.ui.auth.AuthViewModel
@@ -306,6 +307,25 @@ class FakePaperRepository(
 
   override suspend fun getSignedPageUrl(storagePath: String, expiresInSeconds: Long): Result<String> {
     return Result.success("https://signed.url/$storagePath")
+  }
+}
+
+class FakeOcrRepository(
+  var shouldSucceed: Boolean = true,
+  var cannedOcrText: String = "1. Answer: Database normalization reduces redundancy.",
+  var errorMessage: String = "OCR provider timed out.",
+) : OcrRepository {
+  var lastPaperId: String? = null
+  var lastPageId: String? = null
+
+  override suspend fun processPageOcr(paperId: String, pageId: String): Result<String> {
+    lastPaperId = paperId
+    lastPageId = pageId
+    return if (shouldSucceed) {
+      Result.success(cannedOcrText)
+    } else {
+      Result.failure(Exception(errorMessage))
+    }
   }
 }
 
@@ -763,5 +783,121 @@ class ExampleRobolectricTest {
     // Check that storage files were deleted as well
     assertEquals(2, fakePaperRepo.deletedStoragePaths.size)
     assertTrue(fakePaperRepo.deletedStoragePaths.contains("user-123/class-1/student-1/paper-1/page_1.jpg"))
+  }
+
+  @Test
+  fun `verify StudentDetailViewModel runOcrForPage success and failure flows`() = runTest {
+    val student = Student(id = "student-1", classId = "class-1", teacherId = "user-123", name = "Zaid Ali", fatherName = "Ali", rollNumber = "CS-05")
+    val classRoom = ClassRoom(id = "class-1", examId = "exam-1", teacherId = "user-123", session = "2022-2026", semester = "4th", timing = "Morning", subjectName = "Database", totalMarks = 100)
+    val paper = StudentPaper(
+      id = "paper-1",
+      studentId = "student-1",
+      classId = "class-1",
+      teacherId = "user-123",
+      totalPages = 1,
+      pages = listOf(
+        StudentPaperPage(id = "page-1", paperId = "paper-1", studentId = "student-1", teacherId = "user-123", pageNumber = 1, storagePath = "path/page_1.jpg"),
+      )
+    )
+
+    val fakeStudentRepo = FakeStudentRepository(listOf(student))
+    val fakeClassRepo = FakeClassRepository(listOf(classRoom))
+    val fakePaperRepo = FakePaperRepository(listOf(paper))
+    val fakeOcrRepo = FakeOcrRepository(shouldSucceed = true, cannedOcrText = "Question 1: Database normalization reduces redundancy.")
+
+    val viewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo, fakeOcrRepo)
+
+    // Run OCR successfully
+    viewModel.runOcrForPage("paper-1", "page-1")
+    assertEquals("Question 1: Database normalization reduces redundancy.", viewModel.uiState.value.ocrTextByPageId["page-1"])
+    assertTrue(viewModel.uiState.value.ocrLoadingPageIds.isEmpty())
+    assertNull(viewModel.uiState.value.ocrErrorByPageId["page-1"])
+    assertEquals("Handwriting transcribed successfully.", viewModel.uiState.value.feedbackMessage)
+    assertEquals("paper-1", fakeOcrRepo.lastPaperId)
+    assertEquals("page-1", fakeOcrRepo.lastPageId)
+
+    // Run OCR failure
+    fakeOcrRepo.shouldSucceed = false
+    viewModel.runOcrForPage("paper-1", "page-2")
+    assertEquals("OCR provider timed out.", viewModel.uiState.value.ocrErrorByPageId["page-2"])
+    assertTrue(viewModel.uiState.value.ocrLoadingPageIds.isEmpty())
+
+    // Clear error
+    viewModel.clearOcrError("page-2")
+    assertNull(viewModel.uiState.value.ocrErrorByPageId["page-2"])
+  }
+
+  @Test
+  fun studentDetailViewModel_aiEvaluationResponseParsingAndDismiss() = runTest {
+    val json = """
+      {
+        "status": "needs_review",
+        "percentageAvailable": false,
+        "evaluation": {
+          "id": "eval-123",
+          "paperId": "paper-1",
+          "studentId": "student-1",
+          "classId": "class-1",
+          "status": "needs_review",
+          "totalMarksObtained": 5,
+          "totalMarks": 100,
+          "extractedQuestionTotalMarks": 20,
+          "percentage": null,
+          "percentageAvailable": false,
+          "reviewRequired": true,
+          "reviewReason": "Extracted question marks (20) do not reliably match the configured class total marks (100).",
+          "questions": [
+            {
+              "question_number": "1",
+              "question_text": "what is motherboard ?",
+              "maximum_marks": 10,
+              "student_answer": "A electric circuit ,",
+              "expected_answer": "[Provisional Reference Answer]: Main printed circuit board.",
+              "marking_criteria": "[Provisional Criteria]: Accurate definition earns full marks.",
+              "awarded_marks": 3,
+              "feedback": "Partially correct.",
+              "review_required": false,
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated"
+            }
+          ]
+        }
+      }
+    """.trimIndent()
+
+    val parsed = com.example.data.model.evaluationJsonParser.decodeFromString<com.example.data.model.AiEvaluationResponse>(json)
+    assertNotNull(parsed.evaluation)
+    assertEquals("needs_review", parsed.status)
+    assertFalse(parsed.percentageAvailable)
+    assertEquals(5.0, parsed.evaluation?.totalMarksObtained)
+    assertEquals(100.0, parsed.evaluation?.totalMarks)
+    assertEquals(20.0, parsed.evaluation?.extractedQuestionTotalMarks)
+    assertEquals("5", parsed.evaluation?.displayTotalMarksObtained)
+    assertEquals("100", parsed.evaluation?.displayTotalMarks)
+    assertTrue(parsed.evaluation?.reviewRequired == true)
+    assertEquals("Extracted question marks (20) do not reliably match the configured class total marks (100).", parsed.evaluation?.reviewReason)
+
+    val q = parsed.evaluation?.questions?.firstOrNull()
+    assertNotNull(q)
+    assertEquals("1", q?.questionNumber)
+    assertEquals("what is motherboard ?", q?.questionText)
+    assertEquals(10.0, q?.maximumMarks)
+    assertEquals(3.0, q?.awardedMarks)
+    assertEquals("3", q?.displayAwardedMarks)
+    assertEquals("10", q?.displayMaxMarks)
+    assertEquals("A electric circuit ,", q?.studentAnswer)
+    assertEquals("ai_generated", q?.expectedAnswerSource)
+    assertEquals("ai_generated", q?.markingCriteriaSource)
+    assertFalse(q?.reviewRequired == true)
+
+    val fakeStudentRepo = FakeStudentRepository()
+    val fakeClassRepo = FakeClassRepository()
+    val fakePaperRepo = FakePaperRepository()
+    val viewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo)
+
+    viewModel.dismissEvaluationDialog()
+    assertNull(viewModel.uiState.value.evaluationResult)
+    assertNull(viewModel.uiState.value.evaluationResultJson)
+    assertNull(viewModel.uiState.value.evaluationError)
   }
 }

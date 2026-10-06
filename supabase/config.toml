@@ -1,0 +1,5 @@
+[functions.process-paper-ocr]
+verify_jwt = true
+
+[functions.process-and-grade-paper]
+verify_jwt = true

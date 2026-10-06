@@ -1,5 +1,6 @@
 package com.example.ui.paper
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,18 +21,25 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SupervisorAccount
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WbTwilight
 import androidx.compose.material3.AlertDialog
@@ -58,13 +67,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -73,7 +85,9 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.model.StudentPaper
 import com.example.data.model.StudentPaperPage
+import com.example.ui.paper.components.TeacherReviewDialog
 import com.example.ui.theme.TertiaryAmber
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,9 +101,11 @@ fun StudentDetailScreen(
   val uiState by viewModel.uiState.collectAsState()
   val snackbarHostState = remember { SnackbarHostState() }
   val scrollState = rememberScrollState()
+  val clipboardManager = LocalClipboardManager.current
+  val coroutineScope = rememberCoroutineScope()
 
   var paperToDelete by remember { mutableStateOf<StudentPaper?>(null) }
-  var previewImageUrl by remember { mutableStateOf<String?>(null) }
+  var activePreviewPage by remember { mutableStateOf<StudentPaperPage?>(null) }
 
   LaunchedEffect(studentId) {
     viewModel.loadStudentAndPapers(studentId)
@@ -157,36 +173,444 @@ fun StudentDetailScreen(
     )
   }
 
-  // Image Preview Dialog
-  if (previewImageUrl != null) {
-    Dialog(
-      onDismissRequest = { previewImageUrl = null },
-      properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-      Box(
-        modifier = Modifier
-          .fillMaxSize()
-          .background(Color.Black)
-          .padding(16.dp),
-      ) {
-        AsyncImage(
-          model = previewImageUrl,
-          contentDescription = "Page preview",
-          contentScale = ContentScale.Fit,
-          modifier = Modifier.fillMaxSize(),
-        )
+  // Teacher Review UI Dialog (when evaluation result is available)
+  if (uiState.evaluationResult != null || (uiState.evaluationResultJson != null && uiState.evaluationError == null)) {
+    val studentName = uiState.student?.name ?: "Student"
+    val className = uiState.classRoom?.subjectName ?: "Class"
 
-        IconButton(
-          onClick = { previewImageUrl = null },
-          modifier = Modifier
-            .align(Alignment.TopEnd)
-            .background(Color.Black.copy(alpha = 0.6f), CircleShape),
+    TeacherReviewDialog(
+      evaluationResponse = uiState.evaluationResult,
+      rawJson = uiState.evaluationResultJson,
+      studentName = studentName,
+      className = className,
+      onDismiss = { viewModel.dismissEvaluationDialog() },
+      onCopyJson = {
+        clipboardManager.setText(AnnotatedString(uiState.evaluationResultJson.orEmpty()))
+        coroutineScope.launch {
+          snackbarHostState.showSnackbar("Evaluation JSON copied to clipboard")
+        }
+      },
+    )
+  }
+
+  // Evaluation Error Dialog (when evaluation fails)
+  if (uiState.evaluationError != null && uiState.evaluationResult == null) {
+    AlertDialog(
+      onDismissRequest = { viewModel.dismissEvaluationDialog() },
+      title = {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
           Icon(
-            imageVector = Icons.Default.Close,
-            contentDescription = "Close preview",
-            tint = Color.White,
+            imageVector = Icons.Default.ErrorOutline,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
           )
+          Text(
+            text = "AI Evaluation Failed",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+          )
+        }
+      },
+      text = {
+        Column {
+          Text(
+            text = uiState.evaluationError.orEmpty(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val pid = uiState.evaluatedPaperId
+            viewModel.dismissEvaluationDialog()
+            if (!pid.isNullOrBlank()) {
+              viewModel.runAiEvaluation(pid)
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+          modifier = Modifier.testTag("retry_evaluation_button"),
+        ) {
+          Text("Retry")
+        }
+      },
+      dismissButton = {
+        TextButton(
+          onClick = { viewModel.dismissEvaluationDialog() },
+          modifier = Modifier.testTag("close_evaluation_dialog_button"),
+        ) {
+          Text("Close")
+        }
+      },
+      shape = RoundedCornerShape(16.dp),
+      modifier = Modifier.testTag("evaluation_error_dialog"),
+    )
+  }
+
+  // Page Inspection & Handwriting OCR Dialog
+  if (activePreviewPage != null) {
+    val page = activePreviewPage!!
+    val signedUrl = uiState.signedUrls[page.storagePath]
+    val pageId = page.id ?: ""
+    val isOcrLoading = uiState.ocrLoadingPageIds.contains(pageId)
+    val ocrText = uiState.ocrTextByPageId[pageId]
+    val ocrError = uiState.ocrErrorByPageId[pageId]
+
+    Dialog(
+      onDismissRequest = {
+        if (!isOcrLoading) activePreviewPage = null
+      },
+      properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+      Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 6.dp,
+        modifier = Modifier
+          .fillMaxWidth(0.95f)
+          .fillMaxHeight(0.92f)
+          .testTag("paper_page_ocr_dialog"),
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        ) {
+          // Dialog Header
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Column {
+              Text(
+                text = "Page ${page.pageNumber}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+              )
+              Text(
+                text = "Handwritten Student Answer Sheet",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+
+            IconButton(
+              onClick = { activePreviewPage = null },
+              enabled = !isOcrLoading,
+              modifier = Modifier.testTag("close_ocr_dialog_button"),
+            ) {
+              Icon(imageVector = Icons.Default.Close, contentDescription = "Close preview")
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          // Scrollable Body: Image + OCR
+          Column(
+            modifier = Modifier
+              .weight(1f)
+              .verticalScroll(rememberScrollState()),
+          ) {
+            // High-fidelity Scanned Image Preview
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(280.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black.copy(alpha = 0.05f)),
+              contentAlignment = Alignment.Center,
+            ) {
+              if (signedUrl != null) {
+                AsyncImage(
+                  model = signedUrl,
+                  contentDescription = "Page ${page.pageNumber}",
+                  contentScale = ContentScale.Fit,
+                  modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("preview_page_image"),
+                )
+              } else {
+                CircularProgressIndicator(
+                  color = MaterialTheme.colorScheme.primary,
+                  modifier = Modifier.size(32.dp),
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // OCR Action & Result Card
+            Card(
+              shape = RoundedCornerShape(14.dp),
+              colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+              ),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("ocr_section_card"),
+            ) {
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(16.dp),
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  modifier = Modifier.fillMaxWidth(),
+                ) {
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.TextFields,
+                      contentDescription = null,
+                      tint = MaterialTheme.colorScheme.primary,
+                      modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                      text = "Handwriting OCR",
+                      style = MaterialTheme.typography.titleSmall,
+                      fontWeight = FontWeight.Bold,
+                    )
+                  }
+
+                  if (ocrText != null && !isOcrLoading) {
+                    Surface(
+                      shape = RoundedCornerShape(8.dp),
+                      color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.CheckCircle,
+                          contentDescription = null,
+                          tint = MaterialTheme.colorScheme.primary,
+                          modifier = Modifier.size(12.dp),
+                        )
+                        Text(
+                          text = "Transcribed",
+                          style = MaterialTheme.typography.labelSmall,
+                          fontWeight = FontWeight.SemiBold,
+                          color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                      }
+                    }
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                when {
+                  // 1. OCR In Progress
+                  isOcrLoading -> {
+                    Column(
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp)
+                        .testTag("ocr_loading_state"),
+                    ) {
+                      CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(32.dp),
+                      )
+                      Spacer(modifier = Modifier.height(10.dp))
+                      Text(
+                        text = "Transcribing handwriting with Gemini...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary,
+                      )
+                      Spacer(modifier = Modifier.height(4.dp))
+                      Text(
+                        text = "Fetching private scan via secure Edge Function",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                    }
+                  }
+
+                  // 2. OCR Succeeded
+                  ocrText != null -> {
+                    Column(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("ocr_completed_state"),
+                    ) {
+                      Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                          .fillMaxWidth()
+                          .padding(vertical = 4.dp),
+                      ) {
+                        SelectionContainer {
+                          Text(
+                            text = ocrText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier
+                              .padding(12.dp)
+                              .testTag("ocr_result_text"),
+                          )
+                        }
+                      }
+
+                      Spacer(modifier = Modifier.height(12.dp))
+
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                      ) {
+                        Button(
+                          onClick = {
+                            clipboardManager.setText(AnnotatedString(ocrText))
+                            coroutineScope.launch {
+                              snackbarHostState.showSnackbar("Transcribed text copied to clipboard")
+                            }
+                          },
+                          shape = RoundedCornerShape(10.dp),
+                          colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                          ),
+                          modifier = Modifier
+                            .weight(1f)
+                            .testTag("copy_ocr_text_button"),
+                        ) {
+                          Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                          )
+                          Spacer(modifier = Modifier.width(6.dp))
+                          Text("Copy Text")
+                        }
+
+                        OutlinedButton(
+                          onClick = {
+                            viewModel.runOcrForPage(page.paperId, pageId)
+                          },
+                          shape = RoundedCornerShape(10.dp),
+                          modifier = Modifier.testTag("rerun_ocr_button"),
+                        ) {
+                          Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                          )
+                          Spacer(modifier = Modifier.width(4.dp))
+                          Text("Re-run")
+                        }
+                      }
+                    }
+                  }
+
+                  // 3. OCR Failed
+                  ocrError != null -> {
+                    Column(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("ocr_error_state"),
+                    ) {
+                      Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.ErrorOutline,
+                          contentDescription = null,
+                          tint = MaterialTheme.colorScheme.error,
+                          modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                          text = "OCR Failed",
+                          style = MaterialTheme.typography.titleSmall,
+                          fontWeight = FontWeight.Bold,
+                          color = MaterialTheme.colorScheme.error,
+                        )
+                      }
+                      Spacer(modifier = Modifier.height(4.dp))
+                      Text(
+                        text = ocrError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                      Spacer(modifier = Modifier.height(12.dp))
+                      Button(
+                        onClick = {
+                          viewModel.runOcrForPage(page.paperId, pageId)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                          containerColor = MaterialTheme.colorScheme.error
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                          .fillMaxWidth()
+                          .testTag("retry_ocr_button"),
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.Refresh,
+                          contentDescription = null,
+                          modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Retry OCR")
+                      }
+                    }
+                  }
+
+                  // 4. Initial State: Run OCR
+                  else -> {
+                    Column(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("ocr_initial_state"),
+                    ) {
+                      Text(
+                        text = "Transcribe handwritten student answers from this page into clean, editable text using the process-paper-ocr service.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                      Spacer(modifier = Modifier.height(12.dp))
+                      Button(
+                        onClick = {
+                          viewModel.runOcrForPage(page.paperId, pageId)
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                          containerColor = MaterialTheme.colorScheme.primary
+                        ),
+                        modifier = Modifier
+                          .fillMaxWidth()
+                          .testTag("run_ocr_button"),
+                      ) {
+                        Icon(
+                          imageVector = Icons.Default.TextFields,
+                          contentDescription = null,
+                          modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Run OCR")
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -521,8 +945,14 @@ fun StudentDetailScreen(
                     paper = paper,
                     index = index + 1,
                     signedUrls = uiState.signedUrls,
-                    onPageClick = { signedUrl ->
-                      previewImageUrl = signedUrl
+                    ocrTextByPageId = uiState.ocrTextByPageId,
+                    ocrLoadingPageIds = uiState.ocrLoadingPageIds,
+                    isEvaluating = uiState.isEvaluatingPaperId == paper.id,
+                    onEvaluateClick = {
+                      paper.id?.let { pid -> viewModel.runAiEvaluation(pid) }
+                    },
+                    onPageClick = { page ->
+                      activePreviewPage = page
                     },
                     onDeleteClick = {
                       paperToDelete = paper
@@ -546,7 +976,11 @@ fun StudentPaperCard(
   paper: StudentPaper,
   index: Int,
   signedUrls: Map<String, String>,
-  onPageClick: (String) -> Unit,
+  ocrTextByPageId: Map<String, String> = emptyMap(),
+  ocrLoadingPageIds: Set<String> = emptySet(),
+  isEvaluating: Boolean = false,
+  onEvaluateClick: () -> Unit = {},
+  onPageClick: (StudentPaperPage) -> Unit,
   onDeleteClick: () -> Unit,
   onRequestSignedUrl: (String) -> Unit,
   modifier: Modifier = Modifier,
@@ -645,9 +1079,87 @@ fun StudentPaperCard(
             PaperPageThumbnail(
               page = page,
               signedUrl = signedUrls[page.storagePath],
-              onClick = { url -> onPageClick(url) },
+              hasOcr = page.id != null && ocrTextByPageId.containsKey(page.id),
+              isOcrLoading = page.id != null && ocrLoadingPageIds.contains(page.id),
+              onClick = { onPageClick(page) },
               onRequestSignedUrl = { onRequestSignedUrl(page.storagePath) },
             )
+          }
+        }
+      }
+
+      // AI Evaluation & Teacher Review Action
+      Spacer(modifier = Modifier.height(14.dp))
+      Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(12.dp),
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+              Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp),
+              )
+              Text(
+                text = "AI Grading Pipeline",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+              )
+            }
+
+            Text(
+              text = "Evaluation",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          Button(
+            onClick = onEvaluateClick,
+            enabled = !isEvaluating,
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(
+              containerColor = MaterialTheme.colorScheme.primary,
+            ),
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("run_ai_evaluation_button_${paper.id}"),
+          ) {
+            if (isEvaluating) {
+              CircularProgressIndicator(
+                color = MaterialTheme.colorScheme.onPrimary,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text("Processing & Grading Paper...")
+            } else {
+              Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Run AI Evaluation & Review")
+            }
           }
         }
       }
@@ -659,7 +1171,9 @@ fun StudentPaperCard(
 fun PaperPageThumbnail(
   page: StudentPaperPage,
   signedUrl: String?,
-  onClick: (String) -> Unit,
+  hasOcr: Boolean = false,
+  isOcrLoading: Boolean = false,
+  onClick: () -> Unit,
   onRequestSignedUrl: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -675,9 +1189,8 @@ fun PaperPageThumbnail(
     modifier = modifier
       .size(width = 84.dp, height = 110.dp)
       .clip(RoundedCornerShape(10.dp))
-      .clickable(enabled = signedUrl != null) {
-        signedUrl?.let { onClick(it) }
-      },
+      .clickable { onClick() }
+      .testTag("page_thumbnail_${page.id ?: page.pageNumber}"),
   ) {
     Box(contentAlignment = Alignment.Center) {
       if (signedUrl != null) {
@@ -696,6 +1209,21 @@ fun PaperPageThumbnail(
         )
       }
 
+      if (isOcrLoading) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f)),
+          contentAlignment = Alignment.Center,
+        ) {
+          CircularProgressIndicator(
+            color = Color.White,
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(20.dp),
+          )
+        }
+      }
+
       // Small Page indicator
       Surface(
         shape = RoundedCornerShape(4.dp),
@@ -710,6 +1238,24 @@ fun PaperPageThumbnail(
           color = Color.White,
           modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
         )
+      }
+
+      if (hasOcr) {
+        Surface(
+          shape = RoundedCornerShape(4.dp),
+          color = MaterialTheme.colorScheme.primary,
+          modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(4.dp),
+        ) {
+          Text(
+            text = "OCR",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp),
+          )
+        }
       }
     }
   }

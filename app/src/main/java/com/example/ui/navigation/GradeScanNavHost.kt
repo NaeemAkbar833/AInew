@@ -16,11 +16,13 @@ import androidx.navigation.navArgument
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.ClassRepository
 import com.example.data.repository.ExamRepository
+import com.example.data.repository.OcrRepository
 import com.example.data.repository.PaperRepository
 import com.example.data.repository.StudentRepository
 import com.example.data.repository.SupabaseAuthRepository
 import com.example.data.repository.SupabaseClassRepository
 import com.example.data.repository.SupabaseExamRepository
+import com.example.data.repository.SupabaseOcrRepository
 import com.example.data.repository.SupabasePaperRepository
 import com.example.data.repository.SupabaseStudentRepository
 import com.example.ui.auth.AuthViewModel
@@ -50,6 +52,7 @@ fun GradeScanNavHost(
   classRepository: ClassRepository = remember { SupabaseClassRepository(authRepository) },
   studentRepository: StudentRepository = remember { SupabaseStudentRepository(authRepository) },
   paperRepository: PaperRepository = remember { SupabasePaperRepository(authRepository) },
+  ocrRepository: OcrRepository = remember { SupabaseOcrRepository(authRepository) },
 ) {
   val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
   val homeViewModel: HomeViewModel = viewModel { HomeViewModel(authRepository) }
@@ -57,7 +60,7 @@ fun GradeScanNavHost(
   val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
   val studentViewModel: StudentViewModel = viewModel { StudentViewModel(studentRepository, classRepository) }
   val studentDetailViewModel: StudentDetailViewModel = viewModel {
-    StudentDetailViewModel(studentRepository, classRepository, paperRepository)
+    StudentDetailViewModel(studentRepository, classRepository, paperRepository, ocrRepository)
   }
   val scanPaperViewModel: ScanPaperViewModel = viewModel { ScanPaperViewModel(paperRepository) }
 
