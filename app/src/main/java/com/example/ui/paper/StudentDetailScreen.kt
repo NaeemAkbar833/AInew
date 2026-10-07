@@ -183,12 +183,18 @@ fun StudentDetailScreen(
       rawJson = uiState.evaluationResultJson,
       studentName = studentName,
       className = className,
+      fallbackPaperId = uiState.evaluatedPaperId,
+      isApproving = uiState.isApproving,
+      approvalError = uiState.approvalError,
       onDismiss = { viewModel.dismissEvaluationDialog() },
       onCopyJson = {
         clipboardManager.setText(AnnotatedString(uiState.evaluationResultJson.orEmpty()))
         coroutineScope.launch {
           snackbarHostState.showSnackbar("Evaluation JSON copied to clipboard")
         }
+      },
+      onApprove = { evalId, paperId ->
+        viewModel.approveEvaluation(evalId, paperId)
       },
     )
   }

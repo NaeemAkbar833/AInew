@@ -899,5 +899,73 @@ class ExampleRobolectricTest {
     assertNull(viewModel.uiState.value.evaluationResult)
     assertNull(viewModel.uiState.value.evaluationResultJson)
     assertNull(viewModel.uiState.value.evaluationError)
+    assertFalse(viewModel.uiState.value.isApproving)
+    assertFalse(viewModel.uiState.value.approvalSuccess)
+    assertNull(viewModel.uiState.value.approvalError)
+  }
+
+  @Test
+  fun studentDetailViewModel_alreadyApprovedStatePreventsDuplicateRpc() = runTest {
+    val fakeStudentRepo = FakeStudentRepository()
+    val fakeClassRepo = FakeClassRepository()
+    val fakePaperRepo = FakePaperRepository()
+    val viewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo)
+
+    // Blank IDs should be rejected immediately
+    viewModel.approveEvaluation("", "")
+    assertFalse(viewModel.uiState.value.isApproving)
+
+    // Clear error
+    viewModel.clearApprovalError()
+    assertNull(viewModel.uiState.value.approvalError)
+  }
+
+  @Test
+  fun evaluationModels_parseAiEvaluationResponse_handlesFlatAndSnakeCaseJson() = runTest {
+    // Tests flat JSON with snake_case and numeric question_number
+    val flatSnakeJson = """
+      {
+        "status": "needs_review",
+        "total_marks_obtained": "7.5",
+        "total_marks": 50,
+        "review_required": true,
+        "review_reason": "Teacher review recommended.",
+        "questions": [
+          {
+            "question_number": 2,
+            "question_text": "Define RAM",
+            "maximum_marks": "10",
+            "awarded_marks": 7.5,
+            "student_answer": "Random Access Memory",
+            "expected_answer": "Random Access Memory",
+            "marking_criteria": "Accurate definition",
+            "feedback": "Correct definition provided.",
+            "review_required": false,
+            "expected_answer_source": "ai_generated",
+            "marking_criteria_source": "ai_generated"
+          }
+        ]
+      }
+    """.trimIndent()
+
+    val parsed = com.example.data.model.parseAiEvaluationResponse(flatSnakeJson, fallbackPaperId = "paper-99")
+    assertNotNull(parsed)
+    assertNotNull(parsed?.evaluation)
+    assertEquals("needs_review", parsed?.status)
+    assertEquals("paper-99", parsed?.evaluation?.paperId)
+    assertEquals(7.5, parsed?.evaluation?.totalMarksObtained)
+    assertEquals(50.0, parsed?.evaluation?.totalMarks)
+    assertTrue(parsed?.evaluation?.reviewRequired == true)
+    assertEquals("Teacher review recommended.", parsed?.evaluation?.reviewReason)
+
+    val q = parsed?.evaluation?.questions?.firstOrNull()
+    assertNotNull(q)
+    assertEquals("2", q?.questionNumber)
+    assertEquals("Define RAM", q?.questionText)
+    assertEquals(10.0, q?.maximumMarks)
+    assertEquals(7.5, q?.awardedMarks)
+    assertEquals("Random Access Memory", q?.studentAnswer)
+    assertEquals("ai_generated", q?.expectedAnswerSource)
+    assertEquals("ai_generated", q?.markingCriteriaSource)
   }
 }
