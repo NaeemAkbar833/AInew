@@ -6,19 +6,6 @@ sealed class Screen(val route: String) {
   data object SignUp : Screen("sign_up")
   data object Home : Screen("home")
   data object Exams : Screen("exams")
-  data object Results : Screen("results")
-  data object ExamClassesResults : Screen("results_exam_classes/{examId}") {
-    fun createRoute(examId: String) = "results_exam_classes/$examId"
-  }
-  data object ClassResults : Screen("results_class/{classId}") {
-    fun createRoute(classId: String) = "results_class/$classId"
-  }
-  data object StudentResultDetail : Screen("student_result_detail/{studentId}/{classId}") {
-    fun createRoute(studentId: String, classId: String) = "student_result_detail/$studentId/$classId"
-  }
-  data object ClassReport : Screen("class_report/{classId}") {
-    fun createRoute(classId: String) = "class_report/$classId"
-  }
   data object ExamDetail : Screen("exam_detail/{examId}") {
     fun createRoute(examId: String) = "exam_detail/$examId"
   }
@@ -30,5 +17,9 @@ sealed class Screen(val route: String) {
   }
   data object ScanPaper : Screen("scan_paper/{studentId}/{classId}") {
     fun createRoute(studentId: String, classId: String) = "scan_paper/$studentId/$classId"
+  }
+  data object Results : Screen("results")
+  data object ClassResults : Screen("class_results/{examId}") {
+    fun createRoute(examId: String) = "class_results/$examId"
   }
 }

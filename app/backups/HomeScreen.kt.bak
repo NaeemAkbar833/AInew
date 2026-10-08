@@ -62,8 +62,8 @@ fun HomeScreen(
   viewModel: HomeViewModel,
   onSignedOut: () -> Unit,
   onNavigateToExams: () -> Unit = {},
-  onNavigateToResults: () -> Unit = {},
   onOpenCreateExam: () -> Unit = {},
+  onNavigateToResults: () -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsState()
