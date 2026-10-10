@@ -63,9 +63,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -98,7 +98,7 @@ fun StudentDetailScreen(
   onNavigateToScan: (studentId: String, classId: String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val uiState by viewModel.uiState.collectAsState()
+  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val snackbarHostState = remember { SnackbarHostState() }
   val scrollState = rememberScrollState()
   val clipboardManager = LocalClipboardManager.current
@@ -957,6 +957,9 @@ fun StudentDetailScreen(
                     onEvaluateClick = {
                       paper.id?.let { pid -> viewModel.runAiEvaluation(pid) }
                     },
+                    onStopClick = {
+                      paper.id?.let { pid -> viewModel.stopAiEvaluation(pid) }
+                    },
                     onPageClick = { page ->
                       activePreviewPage = page
                     },
@@ -986,6 +989,7 @@ fun StudentPaperCard(
   ocrLoadingPageIds: Set<String> = emptySet(),
   isEvaluating: Boolean = false,
   onEvaluateClick: () -> Unit = {},
+  onStopClick: () -> Unit = {},
   onPageClick: (StudentPaperPage) -> Unit,
   onDeleteClick: () -> Unit,
   onRequestSignedUrl: (String) -> Unit,
@@ -1081,7 +1085,7 @@ fun StudentPaperCard(
           contentPadding = PaddingValues(vertical = 4.dp),
           modifier = Modifier.fillMaxWidth(),
         ) {
-          items(paper.pages, key = { it.id ?: "${it.paperId}_${it.pageNumber}" }) { page ->
+          items(paper.pages, key = { it.id!! }) { page ->
             PaperPageThumbnail(
               page = page,
               signedUrl = signedUrls[page.storagePath],
@@ -1095,10 +1099,17 @@ fun StudentPaperCard(
       }
 
       // AI Evaluation & Teacher Review Action
+      val isAnalysisProcessing = paper.ocrStatus == "processing" || isEvaluating
+      val isAnalysisFailed = paper.ocrStatus == "failed"
+
       Spacer(modifier = Modifier.height(14.dp))
       Surface(
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        color = when {
+          isAnalysisFailed -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+          isAnalysisProcessing -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+          else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+        },
         modifier = Modifier.fillMaxWidth(),
       ) {
         Column(
@@ -1116,21 +1127,37 @@ fun StudentPaperCard(
               horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
               Icon(
-                imageVector = Icons.Default.AutoAwesome,
+                imageVector = when {
+                  isAnalysisFailed -> Icons.Default.ErrorOutline
+                  isAnalysisProcessing -> Icons.Default.AutoAwesome
+                  else -> Icons.Default.AutoAwesome
+                },
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = when {
+                  isAnalysisFailed -> MaterialTheme.colorScheme.error
+                  isAnalysisProcessing -> MaterialTheme.colorScheme.secondary
+                  else -> MaterialTheme.colorScheme.primary
+                },
                 modifier = Modifier.size(16.dp),
               )
               Text(
-                text = "AI Grading Pipeline",
+                text = when {
+                  isAnalysisFailed -> "Analysis Failed"
+                  isAnalysisProcessing -> "Analyzing Paper (OCR & AI)..."
+                  else -> "AI Grading Pipeline"
+                },
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary,
+                color = when {
+                  isAnalysisFailed -> MaterialTheme.colorScheme.error
+                  isAnalysisProcessing -> MaterialTheme.colorScheme.secondary
+                  else -> MaterialTheme.colorScheme.primary
+                },
               )
             }
 
             Text(
-              text = "Evaluation",
+              text = if (isAnalysisProcessing) "Analyzing..." else "Evaluation",
               style = MaterialTheme.typography.labelSmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1139,32 +1166,47 @@ fun StudentPaperCard(
           Spacer(modifier = Modifier.height(8.dp))
 
           Button(
-            onClick = onEvaluateClick,
-            enabled = !isEvaluating,
+            onClick = {
+              if (isAnalysisProcessing) {
+                onStopClick()
+              } else {
+                onEvaluateClick()
+              }
+            },
+            enabled = true,
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.primary,
+              containerColor = when {
+                isAnalysisFailed -> MaterialTheme.colorScheme.error
+                isAnalysisProcessing -> MaterialTheme.colorScheme.secondary
+                else -> MaterialTheme.colorScheme.primary
+              },
+              contentColor = when {
+                isAnalysisProcessing -> MaterialTheme.colorScheme.onSecondary
+                else -> MaterialTheme.colorScheme.onPrimary
+              }
             ),
             modifier = Modifier
               .fillMaxWidth()
               .testTag("run_ai_evaluation_button_${paper.id}"),
           ) {
-            if (isEvaluating) {
+            if (isAnalysisProcessing) {
               CircularProgressIndicator(
-                color = MaterialTheme.colorScheme.onPrimary,
+                color = MaterialTheme.colorScheme.onSecondary,
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(16.dp),
               )
               Spacer(modifier = Modifier.width(8.dp))
-              Text("Processing & Grading Paper...")
+              Text("Stop Evaluation")
             } else {
+              val buttonText = if (isAnalysisFailed) "Retry Analysis" else "Start AI Evaluation"
               Icon(
-                imageVector = Icons.Default.AutoAwesome,
+                imageVector = if (isAnalysisFailed) Icons.Default.Refresh else Icons.Default.AutoAwesome,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
               )
               Spacer(modifier = Modifier.width(6.dp))
-              Text("Run AI Evaluation & Review")
+              Text(buttonText)
             }
           }
         }

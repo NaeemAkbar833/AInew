@@ -47,9 +47,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,7 +72,7 @@ fun ExamsScreen(
   onExamClick: (String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val uiState by viewModel.uiState.collectAsState()
+  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val snackbarHostState = remember { SnackbarHostState() }
   var examToDelete by remember { mutableStateOf<Exam?>(null) }
 
@@ -336,7 +336,7 @@ fun ExamsScreen(
               .fillMaxSize()
               .testTag("exams_list"),
           ) {
-            items(uiState.exams, key = { it.id ?: it.name }) { exam ->
+            items(uiState.exams, key = { it.id!! }) { exam ->
               ExamCard(
                 exam = exam,
                 onClick = {

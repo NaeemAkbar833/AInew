@@ -22,6 +22,7 @@ import com.example.data.repository.StudentRepository
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -74,6 +75,8 @@ class StudentDetailViewModel(
 
   private val _uiState = MutableStateFlow(StudentDetailUiState())
   val uiState: StateFlow<StudentDetailUiState> = _uiState.asStateFlow()
+
+  private var evaluationJob: Job? = null
 
   fun loadStudentAndPapers(studentId: String) {
     if (studentId.isBlank()) return
@@ -291,8 +294,10 @@ class StudentDetailViewModel(
 
   fun runAiEvaluation(paperId: String) {
     if (paperId.isBlank()) return
+    if (_uiState.value.isEvaluatingPaperId == paperId) return
 
-    viewModelScope.launch {
+    evaluationJob?.cancel()
+    evaluationJob = viewModelScope.launch {
       _uiState.update {
         it.copy(
           isEvaluatingPaperId = paperId,
@@ -387,6 +392,11 @@ class StudentDetailViewModel(
               evaluationError = errorText,
             )
           }
+
+          // Refresh papers list to show updated OCR status/results on the cards
+          _uiState.value.student?.id?.let { sid ->
+            loadStudentAndPapers(sid)
+          }
         },
         onFailure = { error ->
           val errMessage = error.localizedMessage ?: error.message.orEmpty()
@@ -418,8 +428,23 @@ class StudentDetailViewModel(
               evaluationResultJson = null,
             )
           }
+
+          // Refresh papers list to show updated OCR status/results on the cards
+          _uiState.value.student?.id?.let { sid ->
+            loadStudentAndPapers(sid)
+          }
         }
       )
+    }
+  }
+
+  fun stopAiEvaluation(paperId: String) {
+    if (_uiState.value.isEvaluatingPaperId == paperId) {
+      evaluationJob?.cancel()
+      evaluationJob = null
+      _uiState.update { it.copy(isEvaluatingPaperId = null) }
+      // Refresh to get latest paper status from DB (it might still be 'processing' on server, but UI should be idle)
+      _uiState.value.student?.id?.let { loadStudentAndPapers(it) }
     }
   }
 

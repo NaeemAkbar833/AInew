@@ -62,38 +62,6 @@ fun GradeScanNavHost(
   paperRepository: PaperRepository = remember { SupabasePaperRepository(authRepository) },
   ocrRepository: OcrRepository = remember { SupabaseOcrRepository(authRepository) },
 ) {
-  val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
-  val homeViewModel: HomeViewModel = viewModel { HomeViewModel(authRepository) }
-  val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
-  val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
-  val studentViewModel: StudentViewModel = viewModel { StudentViewModel(studentRepository, classRepository) }
-  val studentDetailViewModel: StudentDetailViewModel = viewModel {
-    StudentDetailViewModel(studentRepository, classRepository, paperRepository, ocrRepository)
-  }
-  val scanPaperViewModel: ScanPaperViewModel = viewModel { ScanPaperViewModel(paperRepository) }
-  val classResultsViewModel: ClassResultsViewModel = viewModel {
-    ClassResultsViewModel(classRepository, studentRepository)
-  }
-  val studentResultDetailViewModel: StudentResultDetailViewModel = viewModel {
-    StudentResultDetailViewModel(studentRepository, classRepository)
-  }
-  val classReportViewModel: ClassReportViewModel = viewModel {
-    ClassReportViewModel(classRepository, examRepository, studentRepository)
-  }
-
-  var isHomeCreateExamDialogOpen by remember { mutableStateOf(false) }
-
-  if (isHomeCreateExamDialogOpen) {
-    CreateExamDialog(
-      onDismissRequest = { isHomeCreateExamDialogOpen = false },
-      onExamCreated = { newExam ->
-        isHomeCreateExamDialogOpen = false
-        navController.navigate(Screen.Exams.route)
-      },
-      viewModel = examViewModel,
-    )
-  }
-
   NavHost(
     navController = navController,
     startDestination = Screen.Splash.route,
@@ -103,7 +71,6 @@ fun GradeScanNavHost(
       SplashScreen(
         authRepository = authRepository,
         onNavigateToHome = {
-          homeViewModel.loadTeacherInfo()
           navController.navigate(Screen.Home.route) {
             popUpTo(Screen.Splash.route) { inclusive = true }
           }
@@ -117,6 +84,7 @@ fun GradeScanNavHost(
     }
 
     composable(Screen.Login.route) {
+      val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
       LoginScreen(
         viewModel = authViewModel,
         onNavigateToSignUp = {
@@ -125,8 +93,6 @@ fun GradeScanNavHost(
         },
         onLoginSuccess = {
           authViewModel.resetSuccess()
-          homeViewModel.loadTeacherInfo()
-          examViewModel.loadExams()
           navController.navigate(Screen.Home.route) {
             popUpTo(Screen.Login.route) { inclusive = true }
           }
@@ -135,6 +101,7 @@ fun GradeScanNavHost(
     }
 
     composable(Screen.SignUp.route) {
+      val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
       SignUpScreen(
         viewModel = authViewModel,
         onNavigateBack = {
@@ -143,8 +110,6 @@ fun GradeScanNavHost(
         },
         onSignUpSuccess = {
           authViewModel.resetSuccess()
-          homeViewModel.loadTeacherInfo()
-          examViewModel.loadExams()
           navController.navigate(Screen.Home.route) {
             popUpTo(Screen.Login.route) { inclusive = true }
           }
@@ -153,10 +118,12 @@ fun GradeScanNavHost(
     }
 
     composable(Screen.Home.route) {
+      val homeViewModel: HomeViewModel = viewModel { HomeViewModel(authRepository) }
+      var isHomeCreateExamDialogOpen by remember { mutableStateOf(false) }
+
       HomeScreen(
         viewModel = homeViewModel,
         onSignedOut = {
-          authViewModel.clearError()
           navController.navigate(Screen.Login.route) {
             popUpTo(Screen.Home.route) { inclusive = true }
           }
@@ -171,9 +138,22 @@ fun GradeScanNavHost(
           isHomeCreateExamDialogOpen = true
         },
       )
+
+      if (isHomeCreateExamDialogOpen) {
+        val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+        CreateExamDialog(
+          onDismissRequest = { isHomeCreateExamDialogOpen = false },
+          onExamCreated = { newExam ->
+            isHomeCreateExamDialogOpen = false
+            navController.navigate(Screen.Exams.route)
+          },
+          viewModel = examViewModel,
+        )
+      }
     }
 
     composable(Screen.Exams.route) {
+      val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
       ExamsScreen(
         viewModel = examViewModel,
         onNavigateBack = {
@@ -186,6 +166,7 @@ fun GradeScanNavHost(
     }
 
     composable(Screen.Results.route) {
+      val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
       ResultsScreen(
         viewModel = examViewModel,
         onNavigateBack = {
@@ -202,6 +183,8 @@ fun GradeScanNavHost(
       arguments = listOf(navArgument("examId") { type = NavType.StringType }),
     ) { backStackEntry ->
       val examId = backStackEntry.arguments?.getString("examId") ?: ""
+      val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+      val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
       ExamClassesResultsScreen(
         examId = examId,
         examViewModel = examViewModel,
@@ -220,6 +203,9 @@ fun GradeScanNavHost(
       arguments = listOf(navArgument("classId") { type = NavType.StringType }),
     ) { backStackEntry ->
       val classId = backStackEntry.arguments?.getString("classId") ?: ""
+      val classResultsViewModel: ClassResultsViewModel = viewModel {
+        ClassResultsViewModel(classRepository, studentRepository)
+      }
       ClassResultsScreen(
         classId = classId,
         viewModel = classResultsViewModel,
@@ -240,6 +226,9 @@ fun GradeScanNavHost(
       arguments = listOf(navArgument("classId") { type = NavType.StringType }),
     ) { backStackEntry ->
       val classId = backStackEntry.arguments?.getString("classId") ?: ""
+      val classReportViewModel: ClassReportViewModel = viewModel {
+        ClassReportViewModel(classRepository, examRepository, studentRepository)
+      }
       ClassReportScreen(
         classId = classId,
         viewModel = classReportViewModel,
@@ -258,6 +247,9 @@ fun GradeScanNavHost(
     ) { backStackEntry ->
       val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
       val classId = backStackEntry.arguments?.getString("classId") ?: ""
+      val studentResultDetailViewModel: StudentResultDetailViewModel = viewModel {
+        StudentResultDetailViewModel(studentRepository, classRepository)
+      }
       StudentResultDetailScreen(
         studentId = studentId,
         classId = classId,
@@ -273,6 +265,8 @@ fun GradeScanNavHost(
       arguments = listOf(navArgument("examId") { type = NavType.StringType }),
     ) { backStackEntry ->
       val examId = backStackEntry.arguments?.getString("examId") ?: ""
+      val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+      val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
       ExamDetailScreen(
         examId = examId,
         examViewModel = examViewModel,
@@ -291,6 +285,7 @@ fun GradeScanNavHost(
       arguments = listOf(navArgument("classId") { type = NavType.StringType }),
     ) { backStackEntry ->
       val classId = backStackEntry.arguments?.getString("classId") ?: ""
+      val studentViewModel: StudentViewModel = viewModel { StudentViewModel(studentRepository, classRepository) }
       ClassDetailScreen(
         classId = classId,
         viewModel = studentViewModel,
@@ -308,6 +303,10 @@ fun GradeScanNavHost(
       arguments = listOf(navArgument("studentId") { type = NavType.StringType }),
     ) { backStackEntry ->
       val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
+      val studentDetailViewModel: StudentDetailViewModel = viewModel {
+        StudentDetailViewModel(studentRepository, classRepository, paperRepository, ocrRepository)
+      }
+
       StudentDetailScreen(
         studentId = studentId,
         viewModel = studentDetailViewModel,
@@ -315,7 +314,6 @@ fun GradeScanNavHost(
           navController.popBackStack()
         },
         onNavigateToScan = { sid, cid ->
-          scanPaperViewModel.clearAllPages()
           navController.navigate(Screen.ScanPaper.createRoute(sid, cid))
         },
       )
@@ -330,6 +328,13 @@ fun GradeScanNavHost(
     ) { backStackEntry ->
       val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
       val classId = backStackEntry.arguments?.getString("classId") ?: ""
+      val scanPaperViewModel: ScanPaperViewModel = viewModel { ScanPaperViewModel(paperRepository) }
+
+      // Access the StudentDetailViewModel from the previous backstack entry (StudentDetail route)
+      // This must be called in a @Composable context.
+      val previousEntry = remember(backStackEntry) { navController.previousBackStackEntry }
+      val studentDetailViewModel: StudentDetailViewModel? = previousEntry?.let { viewModel(it) }
+
       ScanPaperScreen(
         studentId = studentId,
         classId = classId,
@@ -337,8 +342,10 @@ fun GradeScanNavHost(
         onNavigateBack = {
           navController.popBackStack()
         },
-        onScanFinished = {
-          studentDetailViewModel.loadStudentAndPapers(studentId)
+        onScanFinished = { paperId ->
+          studentDetailViewModel?.let { vm ->
+            vm.loadStudentAndPapers(studentId)
+          }
           navController.popBackStack()
         },
       )

@@ -40,8 +40,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -62,7 +62,7 @@ fun StudentResultDetailScreen(
   onNavigateBack: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val uiState by viewModel.uiState.collectAsState()
+  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
   LaunchedEffect(studentId, classId) {
     viewModel.loadStudentResult(studentId, classId)
@@ -206,7 +206,10 @@ fun StudentResultDetailScreen(
           }
 
           // 4. Questions list
-          itemsIndexed(evaluation.questions) { index, question ->
+          itemsIndexed(
+            items = evaluation.questions,
+            key = { _, question -> question.id!! }
+          ) { index, question ->
             ResultQuestionCard(
               question = question,
               index = index,

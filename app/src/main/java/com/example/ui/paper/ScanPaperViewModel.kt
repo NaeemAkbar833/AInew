@@ -80,7 +80,7 @@ class ScanPaperViewModel(
     context: Context,
     studentId: String,
     classId: String,
-    onSuccess: () -> Unit,
+    onSuccess: (String) -> Unit,
   ) {
     val currentPages = _uiState.value.pages
     if (currentPages.isEmpty()) {
@@ -109,7 +109,8 @@ class ScanPaperViewModel(
       )
 
       result.fold(
-        onSuccess = {
+        onSuccess = { createdPaper ->
+          val paperId = createdPaper.id ?: ""
           _uiState.update {
             it.copy(
               pages = emptyList(),
@@ -118,7 +119,7 @@ class ScanPaperViewModel(
               uploadError = null,
             )
           }
-          onSuccess()
+          onSuccess(paperId)
         },
         onFailure = { error ->
           // Scanned pages remain preserved in memory so teacher can retry

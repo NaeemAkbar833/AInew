@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 data class ClassResultsUiState(
@@ -38,31 +39,34 @@ class ClassResultsViewModel(
     viewModelScope.launch {
       _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
-      val classResult = classRepository.getClassById(classId)
-      val classRoom = classResult.getOrNull()
-
-      val studentsResult = studentRepository.getStudentsByClassId(classId)
-      val students = studentsResult.getOrDefault(emptyList())
-
-      val evaluationsMap = mutableMapOf<String, EvaluationDbRecord>()
-      try {
-        if (SupabaseClientProvider.isConfigured()) {
-          val evalRecords = SupabaseClientProvider.client.postgrest["student_paper_evaluations"]
-            .select {
-              filter {
-                eq("class_id", classId)
-                eq("status", "approved")
+      val classDeferred = async { classRepository.getClassById(classId) }
+      val studentsDeferred = async { studentRepository.getStudentsByClassId(classId) }
+      val evaluationsDeferred = async {
+        val evaluationsMap = mutableMapOf<String, EvaluationDbRecord>()
+        try {
+          if (SupabaseClientProvider.isConfigured()) {
+            val evalRecords = SupabaseClientProvider.client.postgrest["student_paper_evaluations"]
+              .select {
+                filter {
+                  eq("class_id", classId)
+                  eq("status", "approved")
+                }
               }
-            }
-            .decodeList<EvaluationDbRecord>()
+              .decodeList<EvaluationDbRecord>()
 
-          evalRecords.forEach { eval ->
-            evaluationsMap[eval.studentId] = eval
+            evalRecords.forEach { eval ->
+              evaluationsMap[eval.studentId] = eval
+            }
           }
+        } catch (e: Exception) {
+          Log.e(TAG, "Error fetching approved evaluations for class $classId", e)
         }
-      } catch (e: Exception) {
-        Log.e(TAG, "Error fetching approved evaluations for class $classId", e)
+        evaluationsMap
       }
+
+      val classRoom = classDeferred.await().getOrNull()
+      val students = studentsDeferred.await().getOrDefault(emptyList())
+      val evaluationsMap = evaluationsDeferred.await()
 
       _uiState.update {
         it.copy(

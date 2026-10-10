@@ -18,6 +18,12 @@ data class StudentPaper(
   val totalPages: Int,
   @SerialName("status")
   val status: String = "scanned",
+  @SerialName("ocr_status")
+  val ocrStatus: String = "pending",
+  @SerialName("combined_ocr_text")
+  val combinedOcrText: String? = null,
+  @SerialName("ocr_error")
+  val ocrError: String? = null,
   @SerialName("created_at")
   val createdAt: String? = null,
   val pages: List<StudentPaperPage> = emptyList(),

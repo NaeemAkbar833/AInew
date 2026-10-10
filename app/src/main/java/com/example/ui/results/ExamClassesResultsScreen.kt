@@ -36,9 +36,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -58,8 +58,8 @@ fun ExamClassesResultsScreen(
   onClassClick: (String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val examUiState by examViewModel.uiState.collectAsState()
-  val classUiState by classViewModel.uiState.collectAsState()
+  val examUiState by examViewModel.uiState.collectAsStateWithLifecycle()
+  val classUiState by classViewModel.uiState.collectAsStateWithLifecycle()
   val snackbarHostState = remember { SnackbarHostState() }
 
   LaunchedEffect(examId) {
@@ -158,7 +158,10 @@ fun ExamClassesResultsScreen(
               modifier = Modifier.padding(bottom = 12.dp, start = 4.dp),
             )
           }
-          items(classesForExam) { classRoom ->
+          items(
+            items = classesForExam,
+            key = { it.id!! }
+          ) { classRoom ->
             ClassResultItemCard(
               classRoom = classRoom,
               onClick = { classRoom.id?.let { onClassClick(it) } },

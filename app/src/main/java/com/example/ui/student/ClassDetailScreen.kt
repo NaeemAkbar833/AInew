@@ -1,5 +1,7 @@
 package com.example.ui.student
 
+import android.net.Uri
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,9 +24,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Grade
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SupervisorAccount
 import androidx.compose.material.icons.filled.WbSunny
@@ -38,6 +43,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -50,9 +56,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,6 +70,12 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.Student
 import com.example.ui.theme.TertiaryAmber
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.example.ui.student.ImportReviewDialog
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClassDetailScreen(
@@ -73,9 +85,32 @@ fun ClassDetailScreen(
   onStudentClick: (String) -> Unit = {},
   modifier: Modifier = Modifier,
 ) {
-  val uiState by viewModel.uiState.collectAsState()
+  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val snackbarHostState = remember { SnackbarHostState() }
   val scrollState = rememberScrollState()
+  val context = LocalContext.current
+
+  var photoUri by remember { mutableStateOf<Uri?>(null) }
+
+  val cameraLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.TakePicture(),
+    onResult = { success ->
+      if (success) {
+        photoUri?.let { uri ->
+          viewModel.addPendingPage(uri)
+        }
+      }
+    }
+  )
+
+  val photoPickerLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.PickMultipleVisualMedia(),
+    onResult = { uris ->
+      if (uris.isNotEmpty()) {
+        viewModel.onImagesSelected(context, classId, uris)
+      }
+    }
+  )
 
   var studentToDelete by remember { mutableStateOf<Student?>(null) }
 
@@ -97,6 +132,15 @@ fun ClassDetailScreen(
     }
   }
 
+  LaunchedEffect(uiState.batchErrorMessage) {
+    uiState.batchErrorMessage?.let { message ->
+      if (!uiState.isReviewDialogOpen) {
+        snackbarHostState.showSnackbar(message)
+        viewModel.dismissBatchErrorMessage()
+      }
+    }
+  }
+
   if (uiState.isAddDialogOpen) {
     AddStudentDialog(
       classId = classId,
@@ -105,6 +149,19 @@ fun ClassDetailScreen(
         // Dialog handles insertion and viewmodel updates list
       },
       viewModel = viewModel,
+    )
+  }
+
+  if (uiState.isReviewDialogOpen) {
+    ImportReviewDialog(
+      extractedStudents = uiState.extractedStudents,
+      isSaving = uiState.isBatchSaving,
+      errorMessage = uiState.batchErrorMessage,
+      onDismissRequest = viewModel::closeReviewDialog,
+      onConfirm = { viewModel.confirmBatchImport(classId) },
+      onUpdateStudent = viewModel::updateExtractedStudent,
+      onDeleteStudent = viewModel::removeExtractedStudent,
+      onDismissError = viewModel::dismissBatchErrorMessage
     )
   }
 
@@ -371,22 +428,115 @@ fun ClassDetailScreen(
               }
             }
 
-            OutlinedButton(
-              onClick = viewModel::openAddDialog,
-              shape = RoundedCornerShape(10.dp),
-              modifier = Modifier.testTag("add_student_button"),
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-              Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-              )
-              Spacer(modifier = Modifier.width(4.dp))
-              Text(
-                text = "Add Student",
-                style = MaterialTheme.typography.labelMedium,
-              )
+              if (uiState.pendingCaptureUris.isNotEmpty() && !uiState.isExtracting) {
+                // Multi-page capture controls
+                Surface(
+                  shape = RoundedCornerShape(12.dp),
+                  color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                ) {
+                  Text(
+                    text = "${uiState.pendingCaptureUris.size} Pages",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                  )
+                }
+
+                IconButton(
+                  onClick = {
+                    viewModel.startExtractionFromPending(context, classId)
+                  },
+                  modifier = Modifier.testTag("finish_scan_list_button")
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Finish and Extract",
+                    tint = Color(0xFF10B981) // Emerald
+                  )
+                }
+
+                IconButton(
+                  onClick = viewModel::clearPendingPages,
+                  modifier = Modifier.testTag("cancel_scan_list_button")
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cancel Scan",
+                    tint = MaterialTheme.colorScheme.error
+                  )
+                }
+              }
+
+              IconButton(
+                onClick = {
+                  val uri = createImageUri(context)
+                  photoUri = uri
+                  cameraLauncher.launch(uri)
+                },
+                enabled = !uiState.isExtracting,
+                modifier = Modifier.testTag("scan_student_list_button")
+              ) {
+                if (uiState.isExtracting) {
+                  CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                  )
+                } else {
+                  Icon(
+                    imageVector = Icons.Default.PhotoCamera,
+                    contentDescription = if (uiState.pendingCaptureUris.isEmpty()) "Scan Student List" else "Add another page",
+                    tint = if (uiState.pendingCaptureUris.isEmpty()) MaterialTheme.colorScheme.primary else Color(0xFFF59E0B) // Amber
+                  )
+                }
+              }
+
+              if (uiState.pendingCaptureUris.isEmpty()) {
+                OutlinedButton(
+                  onClick = viewModel::openAddDialog,
+                  shape = RoundedCornerShape(10.dp),
+                  modifier = Modifier.testTag("add_student_button"),
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                  )
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = "Add Student",
+                    style = MaterialTheme.typography.labelMedium,
+                  )
+                }
+              }
             }
+        }
+
+        if (uiState.isExtracting) {
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+              progress = { uiState.extractionProgress },
+              modifier = Modifier.fillMaxWidth().height(4.dp),
+              color = MaterialTheme.colorScheme.primary,
+              trackColor = MaterialTheme.colorScheme.primaryContainer
+            )
+            Text(
+              text = when {
+                uiState.extractionProgress < 0.1f -> "Starting extraction..."
+                uiState.extractionProgress < 0.4f -> "Optimizing photos for AI..."
+                uiState.extractionProgress < 0.6f -> "Sending to GradeScan AI..."
+                uiState.extractionProgress < 0.95f -> "Processing student list..."
+                else -> "Finalizing..."
+              },
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.primary,
+              modifier = Modifier.padding(top = 4.dp)
+            )
           }
 
           Spacer(modifier = Modifier.height(14.dp))
@@ -588,7 +738,7 @@ fun StudentCard(
         onClick = onDeleteClick,
         modifier = Modifier
           .size(36.dp)
-          .testTag("delete_student_button_${student.rollNumber}"),
+          .testTag("student_delete_button_${student.rollNumber}"),
       ) {
         Icon(
           imageVector = Icons.Default.DeleteOutline,
@@ -599,4 +749,16 @@ fun StudentCard(
       }
     }
   }
+}
+
+private fun createImageUri(context: Context): Uri {
+  val tempFile = java.io.File.createTempFile("student_list_", ".jpg", context.cacheDir).apply {
+    createNewFile()
+    deleteOnExit()
+  }
+  return androidx.core.content.FileProvider.getUriForFile(
+    context,
+    "${context.packageName}.fileprovider",
+    tempFile
+  )
 }
