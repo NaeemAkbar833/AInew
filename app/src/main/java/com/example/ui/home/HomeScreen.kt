@@ -280,76 +280,63 @@ fun HomeScreen(
 
           Spacer(modifier = Modifier.height(14.dp))
 
-          // 2. Welcome / Greeting Area
-          Column(
+          // 2. Welcome / Greeting Area (Subtle frosted-glass panel on the royal-blue gradient)
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color.White.copy(alpha = 0.11f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier
               .fillMaxWidth()
               .testTag("teacher_info_card"),
           ) {
-            Text(
-              text = "Welcome back,",
-              fontFamily = FigtreeFontFamily,
-              fontSize = 13.sp,
-              fontWeight = FontWeight.Medium,
-              color = Color.White.copy(alpha = 0.88f),
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-              text = teacherEmail,
-              fontFamily = BricolageGrotesqueFontFamily,
-              fontSize = 20.sp,
-              lineHeight = 25.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color.White,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-              text = "Set up exams, organize class rosters, and review AI-graded answer sheets.",
-              fontFamily = FigtreeFontFamily,
-              fontSize = 13.sp,
-              lineHeight = 18.sp,
-              color = Color.White.copy(alpha = 0.88f),
-            )
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            ) {
+              Text(
+                text = "Welcome back,",
+                fontFamily = FigtreeFontFamily,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.88f),
+              )
+              Spacer(modifier = Modifier.height(2.dp))
+              Text(
+                text = teacherEmail,
+                fontFamily = BricolageGrotesqueFontFamily,
+                fontSize = 20.sp,
+                lineHeight = 25.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+              Spacer(modifier = Modifier.height(6.dp))
+              Text(
+                text = "Set up exams, organize class rosters, and review AI-graded answer sheets.",
+                fontFamily = FigtreeFontFamily,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                color = Color.White.copy(alpha = 0.88f),
+              )
+            }
           }
 
-          Spacer(modifier = Modifier.height(20.dp))
+          Spacer(modifier = Modifier.height(16.dp))
 
-          // 3. First Row of Quick-Action Cards (sits across the smooth blue-to-light fade)
-          Row(
+          // 3. Prominent Primary Action: Create Exam (sits across the smooth blue-to-light fade)
+          HomePrimaryCreateExamCard(
+            title = "Create Exam",
+            description = "Set up a new exam & date",
+            icon = Icons.AutoMirrored.Outlined.NoteAdd,
+            onClick = onOpenCreateExam,
             modifier = Modifier
               .fillMaxWidth()
-              .height(IntrinsicSize.Max),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-          ) {
-            HomeQuickActionCard(
-              title = "Create Exam",
-              description = "Set up a new exam & date",
-              icon = Icons.AutoMirrored.Outlined.NoteAdd,
-              iconTint = DarkRoyalBlue,
-              iconContainerColor = LightBlueHighlight,
-              isPrimaryAccent = true,
-              onClick = onOpenCreateExam,
-              modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .testTag("action_create_exam"),
-            )
-
-            HomeQuickActionCard(
-              title = "Exams",
-              description = "Manage exams & schedules",
-              icon = Icons.Outlined.Description,
-              iconTint = PrimaryBlue,
-              iconContainerColor = SoftBlueTint,
-              onClick = onNavigateToExams,
-              modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .testTag("action_exams"),
-            )
-          }
+              .testTag("action_create_exam"),
+          )
         }
       }
 
@@ -361,16 +348,29 @@ fun HomeScreen(
       ) {
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Second Row of Quick-Action Cards
+        // Grouped Quick-Action Row: Exams, Classes, and Results
         Row(
           modifier = Modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Max),
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
           HomeQuickActionCard(
+            title = "Exams",
+            description = "Exams & schedules",
+            icon = Icons.Outlined.Description,
+            iconTint = PrimaryBlue,
+            iconContainerColor = SoftBlueTint,
+            onClick = onNavigateToExams,
+            modifier = Modifier
+              .weight(1f)
+              .fillMaxHeight()
+              .testTag("action_exams"),
+          )
+
+          HomeQuickActionCard(
             title = "Classes",
-            description = "Rosters & question papers",
+            description = "Rosters & papers",
             icon = Icons.Outlined.Book,
             iconTint = PrimaryBlue,
             iconContainerColor = SoftBlueTint,
@@ -383,7 +383,7 @@ fun HomeScreen(
 
           HomeQuickActionCard(
             title = "Results",
-            description = "Approved scores & reports",
+            description = "Scores & reports",
             icon = Icons.Outlined.Assessment,
             iconTint = PrimaryBlue,
             iconContainerColor = SoftBlueTint,
@@ -486,6 +486,91 @@ fun HomeScreen(
 }
 
 @Composable
+private fun HomePrimaryCreateExamCard(
+  title: String,
+  description: String,
+  icon: ImageVector,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  Card(
+    shape = RoundedCornerShape(14.dp),
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    border = BorderStroke(
+      width = 1.dp,
+      color = PrimaryBlue.copy(alpha = 0.30f),
+    ),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    modifier = modifier
+      .clickable(
+        role = Role.Button,
+        onClick = onClick,
+      ),
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp, vertical = 13.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = LightBlueHighlight,
+        border = BorderStroke(1.dp, PrimaryBlue.copy(alpha = 0.18f)),
+        modifier = Modifier.size(38.dp),
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          Icon(
+            imageVector = icon,
+            contentDescription = title,
+            tint = DarkRoyalBlue,
+            modifier = Modifier.size(19.dp),
+          )
+        }
+      }
+
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = title,
+          fontFamily = BricolageGrotesqueFontFamily,
+          fontSize = 15.sp,
+          fontWeight = FontWeight.Bold,
+          color = TextPrimary,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+          text = description,
+          fontFamily = FigtreeFontFamily,
+          color = TextSecondary,
+          fontSize = 12.5.sp,
+          lineHeight = 16.sp,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = SoftBlueTint,
+        modifier = Modifier.size(28.dp),
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = PrimaryBlue,
+            modifier = Modifier.size(16.dp),
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
 private fun HomeQuickActionCard(
   title: String,
   description: String,
@@ -494,18 +579,17 @@ private fun HomeQuickActionCard(
   iconContainerColor: Color,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
-  isPrimaryAccent: Boolean = false,
 ) {
   Card(
     shape = RoundedCornerShape(14.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
     border = BorderStroke(
       width = 1.dp,
-      color = if (isPrimaryAccent) PrimaryBlue.copy(alpha = 0.28f) else BorderGray,
+      color = BorderGray,
     ),
     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     modifier = modifier
-      .heightIn(min = 112.dp)
+      .heightIn(min = 104.dp)
       .clickable(
         role = Role.Button,
         onClick = onClick,
@@ -514,7 +598,7 @@ private fun HomeQuickActionCard(
     Column(
       modifier = Modifier
         .fillMaxSize()
-        .padding(14.dp),
+        .padding(12.dp),
       verticalArrangement = Arrangement.SpaceBetween,
     ) {
       Row(
@@ -526,14 +610,14 @@ private fun HomeQuickActionCard(
           shape = RoundedCornerShape(9.dp),
           color = iconContainerColor,
           border = BorderStroke(1.dp, PrimaryBlue.copy(alpha = 0.14f)),
-          modifier = Modifier.size(34.dp),
+          modifier = Modifier.size(32.dp),
         ) {
           Box(contentAlignment = Alignment.Center) {
             Icon(
               imageVector = icon,
               contentDescription = title,
               tint = iconTint,
-              modifier = Modifier.size(18.dp),
+              modifier = Modifier.size(17.dp),
             )
           }
         }
@@ -541,8 +625,8 @@ private fun HomeQuickActionCard(
         Icon(
           imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
           contentDescription = null,
-          tint = if (isPrimaryAccent) PrimaryBlue else TextSecondary.copy(alpha = 0.6f),
-          modifier = Modifier.size(16.dp),
+          tint = TextSecondary.copy(alpha = 0.55f),
+          modifier = Modifier.size(15.dp),
         )
       }
 
@@ -552,7 +636,7 @@ private fun HomeQuickActionCard(
         Text(
           text = title,
           fontFamily = BricolageGrotesqueFontFamily,
-          fontSize = 14.5.sp,
+          fontSize = 14.sp,
           fontWeight = FontWeight.Bold,
           color = TextPrimary,
           maxLines = 1,
@@ -563,8 +647,8 @@ private fun HomeQuickActionCard(
           text = description,
           fontFamily = FigtreeFontFamily,
           color = TextSecondary,
-          fontSize = 12.sp,
-          lineHeight = 16.sp,
+          fontSize = 11.5.sp,
+          lineHeight = 15.sp,
           maxLines = 2,
           overflow = TextOverflow.Ellipsis,
         )
