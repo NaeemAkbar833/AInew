@@ -2,10 +2,13 @@ package com.example.ui.exam
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -161,17 +164,23 @@ fun ExamsScreen(
           IconButton(
             onClick = viewModel::loadExams,
             modifier = Modifier
-              .size(40.dp)
-              .clip(CircleShape)
-              .background(Color.White.copy(alpha = 0.18f))
+              .size(48.dp)
               .testTag("refresh_exams_button"),
           ) {
-            Icon(
-              imageVector = Icons.Default.Refresh,
-              contentDescription = "Refresh",
-              tint = Color.White,
-              modifier = Modifier.size(20.dp),
-            )
+            Box(
+              modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.18f)),
+              contentAlignment = Alignment.Center,
+            ) {
+              Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Refresh",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp),
+              )
+            }
           }
         },
       )
@@ -402,6 +411,7 @@ fun ExamsScreen(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExamCard(
   exam: Exam,
@@ -416,12 +426,12 @@ fun ExamCard(
     else -> listOf(SecondaryTealContainer, SecondaryTeal, SecondaryTealContainer, SecondaryTeal)
   }
 
-  val shape = RoundedCornerShape(20.dp)
+  val shape = RoundedCornerShape(16.dp)
   Card(
     shape = shape,
     colors = CardDefaults.cardColors(containerColor = Color.White),
     border = BorderStroke(1.dp, BorderGray),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     modifier = modifier
       .fillMaxWidth()
       .clip(shape)
@@ -431,45 +441,48 @@ fun ExamCard(
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 18.dp, vertical = 18.dp),
+        .padding(horizontal = 14.dp, vertical = 14.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         color = iconBg,
-        modifier = Modifier.size(48.dp),
+        modifier = Modifier.size(42.dp),
       ) {
         Box(contentAlignment = Alignment.Center) {
           Icon(
             imageVector = Icons.Default.Description,
             contentDescription = null,
             tint = iconTint,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(20.dp),
           )
         }
       }
 
-      Spacer(modifier = Modifier.width(14.dp))
+      Spacer(modifier = Modifier.width(13.dp))
 
       Column(modifier = Modifier.weight(1f)) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-          Text(
-            text = exam.name,
-            fontFamily = BricolageGrotesqueFontFamily,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-          )
+        Text(
+          text = exam.name,
+          fontFamily = BricolageGrotesqueFontFamily,
+          fontSize = 16.sp,
+          lineHeight = 21.sp,
+          fontWeight = FontWeight.Bold,
+          color = TextPrimary,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
 
+        Spacer(modifier = Modifier.height(7.dp))
+
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
           Surface(
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(7.dp),
             color = badgeBg,
+            modifier = Modifier.align(Alignment.CenterVertically),
           ) {
             Text(
               text = exam.type,
@@ -477,59 +490,73 @@ fun ExamCard(
               fontFamily = FigtreeFontFamily,
               fontWeight = FontWeight.Bold,
               fontSize = 11.5.sp,
-              modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             )
           }
+
+          if (exam.date.isNotBlank()) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp),
+              modifier = Modifier.align(Alignment.CenterVertically),
+            ) {
+              Icon(
+                imageVector = Icons.Default.CalendarToday,
+                contentDescription = "Date",
+                tint = TextSecondary,
+                modifier = Modifier.size(12.dp),
+              )
+              Text(
+                text = exam.date,
+                fontFamily = FigtreeFontFamily,
+                fontSize = 12.sp,
+                color = TextSecondary,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+          }
         }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-          Icon(
-            imageVector = Icons.Default.CalendarToday,
-            contentDescription = "Date",
-            tint = TextSecondary,
-            modifier = Modifier.size(13.dp),
-          )
-          Text(
-            text = exam.date,
-            fontFamily = FigtreeFontFamily,
-            fontSize = 13.sp,
-            color = TextSecondary,
-            fontWeight = FontWeight.Medium,
-          )
-        }
-      }
-
-      Spacer(modifier = Modifier.width(6.dp))
-
-      IconButton(
-        onClick = onDeleteClick,
-        modifier = Modifier
-          .size(38.dp)
-          .clip(CircleShape)
-          .background(StatusWarningContainer.copy(alpha = 0.6f))
-          .testTag("delete_exam_button_${exam.name}"),
-      ) {
-        Icon(
-          imageVector = Icons.Default.DeleteOutline,
-          contentDescription = "Delete Exam",
-          tint = StatusWarning,
-          modifier = Modifier.size(19.dp),
-        )
       }
 
       Spacer(modifier = Modifier.width(8.dp))
 
-      Icon(
-        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-        contentDescription = "Open Exam",
-        tint = TextSecondary,
-        modifier = Modifier.size(14.dp),
-      )
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+      ) {
+        IconButton(
+          onClick = onDeleteClick,
+          modifier = Modifier
+            .size(48.dp)
+            .testTag("delete_exam_button_${exam.name}"),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(32.dp)
+              .clip(RoundedCornerShape(8.dp))
+              .background(Color(0xFFF8FAFC))
+              .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(
+              imageVector = Icons.Default.DeleteOutline,
+              contentDescription = "Delete Exam",
+              tint = Color(0xFF94A3B8),
+              modifier = Modifier.size(16.dp),
+            )
+          }
+        }
+
+        Icon(
+          imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+          contentDescription = "Open Exam",
+          tint = TextSecondary,
+          modifier = Modifier.size(12.dp),
+        )
+      }
     }
   }
 }
+

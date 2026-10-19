@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -58,6 +60,10 @@ import com.example.ui.theme.DarkRoyalBlue
 import com.example.ui.theme.FigtreeFontFamily
 import com.example.ui.theme.LightBlueHighlight
 import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.SecondaryTeal
+import com.example.ui.theme.SecondaryTealContainer
+import com.example.ui.theme.StatusAmber
+import com.example.ui.theme.TertiaryAmberContainer
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
@@ -115,11 +121,11 @@ fun ResultsScreen(
         Box(
           modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(20.dp),
           contentAlignment = Alignment.Center,
         ) {
           Card(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = Color.White),
             border = BorderStroke(1.dp, BorderGray),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -128,36 +134,36 @@ fun ResultsScreen(
             Column(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(32.dp),
+                .padding(24.dp),
               horizontalAlignment = Alignment.CenterHorizontally,
             ) {
               Surface(
                 shape = CircleShape,
                 color = AccentVioletContainer,
-                modifier = Modifier.size(64.dp),
+                modifier = Modifier.size(48.dp),
               ) {
                 Box(contentAlignment = Alignment.Center) {
                   Icon(
                     imageVector = Icons.Outlined.Assessment,
                     contentDescription = "No Exams",
                     tint = AccentViolet,
-                    modifier = Modifier.size(30.dp),
+                    modifier = Modifier.size(22.dp),
                   )
                 }
               }
-              Spacer(modifier = Modifier.height(16.dp))
+              Spacer(modifier = Modifier.height(12.dp))
               Text(
                 text = "No exams found",
                 fontFamily = BricolageGrotesqueFontFamily,
-                fontSize = 18.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary,
               )
-              Spacer(modifier = Modifier.height(6.dp))
+              Spacer(modifier = Modifier.height(4.dp))
               Text(
                 text = "Create an exam first to view results and reports.",
                 fontFamily = FigtreeFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 12.5.sp,
                 color = TextSecondary,
                 textAlign = TextAlign.Center,
               )
@@ -166,8 +172,8 @@ fun ResultsScreen(
         }
       } else {
         LazyColumn(
-          contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 96.dp),
-          verticalArrangement = Arrangement.spacedBy(14.dp),
+          contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
           modifier = Modifier
             .fillMaxSize()
             .testTag("results_exams_list"),
@@ -176,10 +182,10 @@ fun ResultsScreen(
             Text(
               text = "Select an exam to inspect approved student marks:",
               fontFamily = FigtreeFontFamily,
-              fontSize = 13.5.sp,
+              fontSize = 13.sp,
               color = TextSecondary,
               fontWeight = FontWeight.SemiBold,
-              modifier = Modifier.padding(bottom = 4.dp, start = 2.dp),
+              modifier = Modifier.padding(bottom = 2.dp, start = 2.dp),
             )
           }
           items(
@@ -197,17 +203,25 @@ fun ResultsScreen(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ResultExamCard(
   exam: Exam,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
+  val (badgeBg, badgeFg) = when (exam.type.lowercase()) {
+    "mid term" -> LightBlueHighlight to DarkRoyalBlue
+    "final" -> AccentVioletContainer to AccentViolet
+    "supply" -> TertiaryAmberContainer to StatusAmber
+    else -> SecondaryTealContainer to SecondaryTeal
+  }
+
   Card(
-    shape = RoundedCornerShape(20.dp),
+    shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
     border = BorderStroke(1.dp, BorderGray),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     modifier = modifier
       .fillMaxWidth()
       .testTag("result_exam_card_${exam.id}"),
@@ -216,76 +230,90 @@ private fun ResultExamCard(
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(18.dp),
+        .padding(horizontal = 14.dp, vertical = 13.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         color = AccentVioletContainer,
-        modifier = Modifier.size(48.dp),
+        modifier = Modifier.size(42.dp),
       ) {
         Box(contentAlignment = Alignment.Center) {
           Icon(
             imageVector = Icons.Outlined.Assessment,
             contentDescription = "Results",
             tint = AccentViolet,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(20.dp),
           )
         }
       }
 
-      Spacer(modifier = Modifier.width(14.dp))
+      Spacer(modifier = Modifier.width(12.dp))
 
-      Column(modifier = Modifier.weight(1f)) {
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
         Text(
           text = exam.name,
           fontFamily = BricolageGrotesqueFontFamily,
-          fontSize = 17.sp,
+          fontSize = 15.5.sp,
           fontWeight = FontWeight.Bold,
           color = TextPrimary,
-          maxLines = 1,
+          maxLines = 2,
           overflow = TextOverflow.Ellipsis,
+          lineHeight = 20.sp,
         )
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
           Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = LightBlueHighlight,
+            shape = RoundedCornerShape(6.dp),
+            color = badgeBg,
+            modifier = Modifier.align(Alignment.CenterVertically),
           ) {
             Text(
               text = exam.type,
               fontFamily = FigtreeFontFamily,
               fontSize = 11.5.sp,
-              color = DarkRoyalBlue,
+              color = badgeFg,
               fontWeight = FontWeight.Bold,
-              modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
             )
           }
           if (exam.date.isNotBlank()) {
-            Spacer(modifier = Modifier.width(10.dp))
-            Icon(
-              imageVector = Icons.Outlined.CalendarToday,
-              contentDescription = "Date",
-              tint = TextSecondary,
-              modifier = Modifier.size(13.dp),
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-              text = exam.date,
-              fontFamily = FigtreeFontFamily,
-              fontSize = 13.sp,
-              color = TextSecondary,
-              fontWeight = FontWeight.Medium,
-            )
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.align(Alignment.CenterVertically),
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.CalendarToday,
+                contentDescription = "Date",
+                tint = TextSecondary,
+                modifier = Modifier.size(13.dp),
+              )
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(
+                text = exam.date,
+                fontFamily = FigtreeFontFamily,
+                fontSize = 12.5.sp,
+                color = TextSecondary,
+                fontWeight = FontWeight.Medium,
+              )
+            }
           }
         }
       }
+
+      Spacer(modifier = Modifier.width(10.dp))
 
       Icon(
         imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
         contentDescription = "Open Results",
         tint = TextSecondary,
-        modifier = Modifier.size(14.dp),
+        modifier = Modifier.size(12.dp),
       )
     }
   }

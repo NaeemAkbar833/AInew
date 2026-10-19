@@ -32,7 +32,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -49,15 +48,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -73,6 +69,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -193,10 +190,10 @@ fun ScanPaperScreen(
             ) {
               Text(
                 text = "${uiState.pages.size} ${if (uiState.pages.size == 1) "Page" else "Pages"}",
-                style = MaterialTheme.typography.labelMedium,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
               )
             }
           }
@@ -245,8 +242,8 @@ fun ScanPaperScreen(
           Column(
             modifier = Modifier
               .fillMaxSize()
-              .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+              .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
             InstructionBanner()
 
@@ -264,15 +261,15 @@ fun ScanPaperScreen(
         } else {
           // Multi-page preview grid
           LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 156.dp),
+            columns = GridCells.Adaptive(minSize = 148.dp),
             contentPadding = PaddingValues(
-              start = 20.dp,
-              end = 20.dp,
-              top = 16.dp,
+              start = 16.dp,
+              end = 16.dp,
+              top = 14.dp,
               bottom = 24.dp,
             ),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
               .fillMaxSize()
               .testTag("scan_pages_grid"),
@@ -349,7 +346,7 @@ fun ScanPaperScreen(
 private fun InstructionBanner() {
   Card(
     modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(14.dp),
+    shape = RoundedCornerShape(12.dp),
     colors = CardDefaults.cardColors(containerColor = LightBlueHighlight),
     border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -357,36 +354,38 @@ private fun InstructionBanner() {
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(14.dp),
+        .padding(12.dp),
       verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
       Box(
         modifier = Modifier
-          .size(40.dp)
+          .size(36.dp)
           .clip(RoundedCornerShape(10.dp))
-          .background(Color.White),
+          .background(Color.White)
+          .border(1.dp, RoyalBlue.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
         contentAlignment = Alignment.Center,
       ) {
         Icon(
           imageVector = Icons.Default.DocumentScanner,
           contentDescription = null,
           tint = RoyalBlue,
-          modifier = Modifier.size(20.dp),
+          modifier = Modifier.size(18.dp),
         )
       }
 
       Column(modifier = Modifier.weight(1f)) {
         Text(
           text = "Multi-Page Capture",
-          style = MaterialTheme.typography.titleSmall,
+          fontSize = 13.5.sp,
           fontWeight = FontWeight.Bold,
           color = TextPrimary,
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
           text = "Add pages in sequence (Page 1, Page 2, etc.). Ensure handwriting is clear and well-lit for accurate OCR.",
-          style = MaterialTheme.typography.bodySmall,
+          fontSize = 12.sp,
+          lineHeight = 16.sp,
           color = TextSecondary,
         )
       }
@@ -402,19 +401,19 @@ private fun EmptyPagesState(
     modifier = Modifier.fillMaxWidth(),
     shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     border = BorderStroke(1.dp, BorderGray),
   ) {
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 24.dp, vertical = 36.dp),
+        .padding(horizontal = 20.dp, vertical = 26.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       Box(
         modifier = Modifier
-          .size(72.dp)
-          .clip(RoundedCornerShape(20.dp))
+          .size(48.dp)
+          .clip(RoundedCornerShape(14.dp))
           .background(LightBlueHighlight),
         contentAlignment = Alignment.Center,
       ) {
@@ -422,30 +421,31 @@ private fun EmptyPagesState(
           imageVector = Icons.Default.AddAPhoto,
           contentDescription = null,
           tint = RoyalBlue,
-          modifier = Modifier.size(34.dp),
+          modifier = Modifier.size(22.dp),
         )
       }
 
-      Spacer(modifier = Modifier.height(16.dp))
+      Spacer(modifier = Modifier.height(12.dp))
 
       Text(
         text = "No Pages Added Yet",
-        style = MaterialTheme.typography.titleMedium,
+        fontSize = 15.5.sp,
         fontWeight = FontWeight.Bold,
         color = TextPrimary,
         textAlign = TextAlign.Center,
       )
 
-      Spacer(modifier = Modifier.height(6.dp))
+      Spacer(modifier = Modifier.height(4.dp))
 
       Text(
         text = "Capture Page 1 of the student's handwritten answer sheet using your camera or select photos from your gallery.",
-        style = MaterialTheme.typography.bodyMedium,
+        fontSize = 12.5.sp,
+        lineHeight = 17.5.sp,
         color = TextSecondary,
         textAlign = TextAlign.Center,
       )
 
-      Spacer(modifier = Modifier.height(24.dp))
+      Spacer(modifier = Modifier.height(18.dp))
 
       GradeScanPrimaryButton(
         text = "Add First Page",
@@ -470,7 +470,7 @@ private fun ScannedPageCard(
       .testTag("page_card_${page.pageNumber}"),
     shape = RoundedCornerShape(14.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     border = BorderStroke(1.dp, BorderGray),
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -492,7 +492,7 @@ private fun ScannedPageCard(
         Box(
           modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp)
+            .height(48.dp)
             .background(
               Brush.verticalGradient(
                 colors = listOf(
@@ -505,58 +505,80 @@ private fun ScannedPageCard(
 
         // Page number badge
         Surface(
-          shape = RoundedCornerShape(8.dp),
+          shape = RoundedCornerShape(6.dp),
           color = RoyalBlue,
           modifier = Modifier
             .align(Alignment.TopStart)
-            .padding(10.dp),
+            .padding(8.dp),
         ) {
           Text(
             text = "Page ${page.pageNumber}",
-            style = MaterialTheme.typography.labelMedium,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = Color.White,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
           )
         }
 
         // Action buttons (Preview & Delete)
         if (!isUploading) {
           Row(
-            modifier = Modifier
-              .align(Alignment.TopEnd)
-              .padding(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.align(Alignment.TopEnd),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
           ) {
-            IconButton(
-              onClick = onPreview,
+            Box(
               modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.92f)),
+                .size(48.dp)
+                .clickable(
+                  role = Role.Button,
+                  onClick = onPreview,
+                ),
+              contentAlignment = Alignment.TopEnd,
             ) {
-              Icon(
-                imageVector = Icons.Default.ZoomIn,
-                contentDescription = "Preview Page ${page.pageNumber}",
-                tint = RoyalBlue,
-                modifier = Modifier.size(16.dp),
-              )
+              Box(
+                modifier = Modifier
+                  .padding(top = 6.dp, end = 3.dp)
+                  .size(28.dp)
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(Color.White.copy(alpha = 0.94f))
+                  .border(1.dp, BorderGray, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  imageVector = Icons.Default.ZoomIn,
+                  contentDescription = "Preview Page ${page.pageNumber}",
+                  tint = RoyalBlue,
+                  modifier = Modifier.size(14.dp),
+                )
+              }
             }
 
-            IconButton(
-              onClick = onRemove,
+            Box(
               modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.92f))
+                .size(48.dp)
+                .clickable(
+                  role = Role.Button,
+                  onClick = onRemove,
+                )
                 .testTag("remove_page_${page.pageNumber}"),
+              contentAlignment = Alignment.TopStart,
             ) {
-              Icon(
-                imageVector = Icons.Default.DeleteOutline,
-                contentDescription = "Remove Page ${page.pageNumber}",
-                tint = StatusWarning,
-                modifier = Modifier.size(16.dp),
-              )
+              Box(
+                modifier = Modifier
+                  .padding(top = 6.dp, start = 3.dp)
+                  .size(28.dp)
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(Color.White.copy(alpha = 0.94f))
+                  .border(1.dp, BorderGray, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  imageVector = Icons.Default.DeleteOutline,
+                  contentDescription = "Remove Page ${page.pageNumber}",
+                  tint = Color(0xFF64748B),
+                  modifier = Modifier.size(14.dp),
+                )
+              }
             }
           }
         }
@@ -567,7 +589,7 @@ private fun ScannedPageCard(
         modifier = Modifier
           .fillMaxWidth()
           .background(Color.White)
-          .padding(horizontal = 12.dp, vertical = 10.dp),
+          .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
@@ -577,7 +599,7 @@ private fun ScannedPageCard(
         ) {
           Text(
             text = "Page ${page.pageNumber}",
-            style = MaterialTheme.typography.bodyMedium,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             color = TextPrimary,
           )
@@ -595,14 +617,13 @@ private fun ScannedPageCard(
                 imageVector = Icons.Default.CheckCircle,
                 contentDescription = null,
                 tint = StatusSuccess,
-                modifier = Modifier.size(11.dp),
+                modifier = Modifier.size(10.dp),
               )
               Text(
                 text = "Ready",
-                style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = StatusSuccess,
-                fontSize = 10.sp,
               )
             }
           }
@@ -610,7 +631,7 @@ private fun ScannedPageCard(
 
         Text(
           text = "Tap to view",
-          style = MaterialTheme.typography.labelSmall,
+          fontSize = 11.sp,
           color = RoyalBlue,
           fontWeight = FontWeight.SemiBold,
           modifier = Modifier.clickable(enabled = !isUploading, onClick = onPreview),
@@ -630,16 +651,16 @@ private fun ScannedPagePreviewDialog(
       modifier = Modifier
         .fillMaxWidth()
         .widthIn(max = 520.dp),
-      shape = RoundedCornerShape(24.dp),
+      shape = RoundedCornerShape(20.dp),
       colors = CardDefaults.cardColors(containerColor = Color.White),
       border = BorderStroke(1.dp, BorderGray),
-      elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+      elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
     ) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+          .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -648,24 +669,29 @@ private fun ScannedPagePreviewDialog(
         ) {
           Text(
             text = "Page Preview",
-            fontSize = 16.sp,
+            fontSize = 15.5.sp,
             fontWeight = FontWeight.Bold,
             color = TextPrimary,
           )
           IconButton(
             onClick = onDismiss,
-            modifier = Modifier
-              .size(32.dp)
-              .clip(CircleShape)
-              .background(LightBlueHighlight)
-              .border(1.dp, BorderGray, CircleShape),
+            modifier = Modifier.size(48.dp),
           ) {
-            Icon(
-              imageVector = Icons.Default.Close,
-              contentDescription = "Close Preview",
-              tint = TextSecondary,
-              modifier = Modifier.size(16.dp),
-            )
+            Box(
+              modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(LightBlueHighlight)
+                .border(1.dp, BorderGray, CircleShape),
+              contentAlignment = Alignment.Center,
+            ) {
+              Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Close Preview",
+                tint = TextSecondary,
+                modifier = Modifier.size(15.dp),
+              )
+            }
           }
         }
 
@@ -673,9 +699,9 @@ private fun ScannedPagePreviewDialog(
           modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(0.72f)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(LightBlueHighlight)
-            .border(1.dp, BorderGray, RoundedCornerShape(14.dp)),
+            .border(1.dp, BorderGray, RoundedCornerShape(12.dp)),
         ) {
           AsyncImage(
             model = uri,
@@ -708,20 +734,20 @@ private fun BottomScanActionBar(
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 20.dp, vertical = 14.dp),
+          .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
       ) {
         Row(
           modifier = Modifier
             .fillMaxWidth()
             .widthIn(max = 600.dp),
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
           verticalAlignment = Alignment.CenterVertically,
         ) {
           OutlinedButton(
             onClick = onAddPageClick,
             enabled = !isUploading,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
             border = BorderStroke(1.dp, BorderGray),
             colors = ButtonDefaults.outlinedButtonColors(
               containerColor = Color.White,
@@ -729,19 +755,19 @@ private fun BottomScanActionBar(
             ),
             modifier = Modifier
               .weight(1f)
-              .height(50.dp)
+              .height(46.dp)
               .testTag("add_page_button"),
           ) {
             Icon(
               imageVector = Icons.Default.AddAPhoto,
               contentDescription = null,
               tint = RoyalBlue,
-              modifier = Modifier.size(18.dp),
+              modifier = Modifier.size(16.dp),
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
               text = "Add Page",
-              style = MaterialTheme.typography.labelLarge,
+              fontSize = 13.sp,
               fontWeight = FontWeight.Bold,
               color = RoyalBlue,
             )
@@ -750,7 +776,7 @@ private fun BottomScanActionBar(
           Button(
             onClick = onSaveClick,
             enabled = !isUploading && pageCount > 0,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(
               containerColor = RoyalBlue,
               contentColor = Color.White,
@@ -759,19 +785,19 @@ private fun BottomScanActionBar(
             ),
             modifier = Modifier
               .weight(1.35f)
-              .height(50.dp)
+              .height(46.dp)
               .testTag("save_paper_button"),
           ) {
             if (isUploading) {
               CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
                 strokeWidth = 2.dp,
                 color = Color.White,
               )
-              Spacer(modifier = Modifier.width(8.dp))
+              Spacer(modifier = Modifier.width(6.dp))
               Text(
                 text = uploadProgressText ?: "Uploading...",
-                style = MaterialTheme.typography.labelLarge,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 maxLines = 1,
@@ -781,12 +807,12 @@ private fun BottomScanActionBar(
                 imageVector = Icons.Default.CloudUpload,
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
               )
-              Spacer(modifier = Modifier.width(8.dp))
+              Spacer(modifier = Modifier.width(6.dp))
               Text(
                 text = "Save Sheet ($pageCount)",
-                style = MaterialTheme.typography.labelLarge,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
               )

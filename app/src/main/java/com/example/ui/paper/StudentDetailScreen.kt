@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,7 +31,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -64,8 +65,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -79,6 +78,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -168,17 +168,23 @@ fun StudentDetailScreen(
           IconButton(
             onClick = { viewModel.loadStudentAndPapers(studentId) },
             modifier = Modifier
-              .size(40.dp)
-              .clip(CircleShape)
-              .background(Color.White.copy(alpha = 0.18f))
+              .size(48.dp)
               .testTag("student_detail_refresh_button"),
           ) {
-            Icon(
-              imageVector = Icons.Default.Refresh,
-              contentDescription = "Refresh",
-              tint = Color.White,
-              modifier = Modifier.size(20.dp),
-            )
+            Box(
+              modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.18f)),
+              contentAlignment = Alignment.Center,
+            ) {
+              Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Refresh",
+                tint = Color.White,
+                modifier = Modifier.size(18.dp),
+              )
+            }
           }
         },
       )
@@ -192,17 +198,19 @@ fun StudentDetailScreen(
             Icon(
               imageVector = Icons.Default.AddAPhoto,
               contentDescription = null,
+              modifier = Modifier.size(18.dp),
             )
           },
           text = {
             Text(
               text = "Scan Answer Sheet",
+              fontSize = 13.5.sp,
               fontWeight = FontWeight.Bold,
             )
           },
           containerColor = RoyalBlue,
           contentColor = Color.White,
-          shape = RoundedCornerShape(16.dp),
+          shape = RoundedCornerShape(14.dp),
           modifier = Modifier.testTag("scan_new_paper_fab"),
         )
       }
@@ -224,14 +232,14 @@ fun StudentDetailScreen(
             modifier = Modifier
               .fillMaxSize()
               .widthIn(max = 600.dp)
-              .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+              .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
             SkeletonBox(
               modifier = Modifier
                 .fillMaxWidth()
-                .height(110.dp),
-              shape = RoundedCornerShape(16.dp),
+                .height(104.dp),
+              shape = RoundedCornerShape(14.dp),
             )
             repeat(3) {
               ExamCardSkeleton()
@@ -257,12 +265,12 @@ fun StudentDetailScreen(
               .widthIn(max = 600.dp)
               .testTag("student_papers_list"),
             contentPadding = PaddingValues(
-              start = 20.dp,
-              end = 20.dp,
-              top = 16.dp,
+              start = 16.dp,
+              end = 16.dp,
+              top = 14.dp,
               bottom = 104.dp,
             ),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
             // 1. Student Header Card
             item {
@@ -277,23 +285,25 @@ fun StudentDetailScreen(
               Row(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .padding(top = 4.dp),
+                  .padding(top = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
               ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                   Text(
                     text = "Scanned Answer Sheets",
-                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
                   )
                   Text(
                     text = "Upload pages, extract OCR text, and run AI grading",
-                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
                     color = TextSecondary,
                   )
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Surface(
                   shape = RoundedCornerShape(999.dp),
@@ -302,11 +312,11 @@ fun StudentDetailScreen(
                 ) {
                   Text(
                     text = "${uiState.papers.size} ${if (uiState.papers.size == 1) "Sheet" else "Sheets"}",
-                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = RoyalBlue,
                     modifier = Modifier
-                      .padding(horizontal = 12.dp, vertical = 5.dp)
+                      .padding(horizontal = 10.dp, vertical = 4.dp)
                       .testTag("papers_count_badge"),
                   )
                 }
@@ -461,6 +471,8 @@ fun StudentDetailScreen(
       evaluationResponse = evalResponse,
       editedQuestions = uiState.editedQuestions,
       studentName = uiState.student?.name.orEmpty(),
+      studentRollNumber = uiState.student?.rollNumber.orEmpty(),
+      fatherName = uiState.student?.fatherName.orEmpty(),
       subjectName = uiState.classRoom?.subjectName.orEmpty(),
       isApproving = uiState.isApproving,
       approvalError = uiState.approvalError,
@@ -481,6 +493,7 @@ fun StudentDetailScreen(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StudentInfoHeaderCard(
   student: Student,
@@ -492,7 +505,7 @@ private fun StudentInfoHeaderCard(
       .testTag("student_info_header_card"),
     shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     border = BorderStroke(1.dp, BorderGray),
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -500,74 +513,74 @@ private fun StudentInfoHeaderCard(
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(5.dp)
+          .height(4.dp)
           .background(RoyalBlue)
       )
 
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+          .padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(14.dp),
+          verticalAlignment = Alignment.Top,
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
           Box(
             modifier = Modifier
-              .size(52.dp)
-              .clip(RoundedCornerShape(14.dp))
+              .size(44.dp)
+              .clip(RoundedCornerShape(12.dp))
               .background(LightBlueHighlight)
-              .border(1.dp, RoyalBlue.copy(alpha = 0.2f), RoundedCornerShape(14.dp)),
+              .border(1.dp, RoyalBlue.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
           ) {
             val initial = student.name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "S"
             Text(
               text = initial,
-              style = MaterialTheme.typography.titleLarge,
+              fontSize = 16.sp,
               fontWeight = FontWeight.Bold,
               color = RoyalBlue,
             )
           }
 
-          Column(modifier = Modifier.weight(1f)) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-              Text(
-                text = student.name,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-              )
-
-              Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = LightBlueHighlight,
-                border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
-              ) {
-                Text(
-                  text = "Roll #${student.rollNumber}",
-                  style = MaterialTheme.typography.labelSmall,
-                  fontWeight = FontWeight.Bold,
-                  color = RoyalBlue,
-                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                )
-              }
-            }
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Text(
+              text = student.name,
+              fontSize = 16.sp,
+              lineHeight = 20.sp,
+              fontWeight = FontWeight.Bold,
+              color = TextPrimary,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+            )
 
             if (student.fatherName.isNotBlank()) {
-              Spacer(modifier = Modifier.height(3.dp))
               Text(
-                text = "Father's Name: ${student.fatherName}",
-                style = MaterialTheme.typography.bodySmall,
+                text = "Father: ${student.fatherName}",
+                fontSize = 12.5.sp,
+                lineHeight = 16.5.sp,
                 color = TextSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+
+            Surface(
+              shape = RoundedCornerShape(6.dp),
+              color = LightBlueHighlight,
+              border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
+            ) {
+              Text(
+                text = "Roll #${student.rollNumber}",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = RoyalBlue,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
               )
             }
           }
@@ -576,21 +589,58 @@ private fun StudentInfoHeaderCard(
         if (classRoom != null) {
           HorizontalDivider(color = BorderGray)
 
-          Row(
+          Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
           ) {
-            MetadataPill(
-              icon = Icons.Default.Class,
-              label = "${classRoom.semester} (${classRoom.timing})",
-              modifier = Modifier.weight(1f),
-            )
-            MetadataPill(
-              icon = Icons.AutoMirrored.Filled.MenuBook,
-              label = classRoom.subjectName,
-              modifier = Modifier.weight(1f),
-            )
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                contentDescription = null,
+                tint = RoyalBlue,
+                modifier = Modifier.size(15.dp),
+              )
+              Text(
+                text = classRoom.subjectName,
+                fontSize = 13.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+              )
+            }
+
+            FlowRow(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+              MetadataPill(
+                icon = Icons.Default.Class,
+                label = "${classRoom.semester} (${classRoom.timing})",
+              )
+              if (classRoom.session.isNotBlank()) {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = LightBlueHighlight,
+                  border = BorderStroke(1.dp, BorderGray),
+                ) {
+                  Text(
+                    text = "Session ${classRoom.session}",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                  )
+                }
+              }
+            }
           }
         }
       }
@@ -606,24 +656,24 @@ private fun MetadataPill(
 ) {
   Surface(
     modifier = modifier,
-    shape = RoundedCornerShape(10.dp),
+    shape = RoundedCornerShape(8.dp),
     color = LightBlueHighlight,
     border = BorderStroke(1.dp, BorderGray),
   ) {
     Row(
-      modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
       verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
       Icon(
         imageVector = icon,
         contentDescription = null,
         tint = RoyalBlue,
-        modifier = Modifier.size(16.dp),
+        modifier = Modifier.size(13.dp),
       )
       Text(
         text = label,
-        style = MaterialTheme.typography.bodySmall,
+        fontSize = 11.5.sp,
         fontWeight = FontWeight.SemiBold,
         color = TextPrimary,
         maxLines = 1,
@@ -644,19 +694,19 @@ private fun EmptyPapersState(
       .testTag("empty_papers_card"),
     shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     border = BorderStroke(1.dp, BorderGray),
   ) {
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 24.dp, vertical = 32.dp),
+        .padding(horizontal = 20.dp, vertical = 24.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       Box(
         modifier = Modifier
-          .size(68.dp)
-          .clip(RoundedCornerShape(18.dp))
+          .size(48.dp)
+          .clip(RoundedCornerShape(14.dp))
           .background(LightBlueHighlight),
         contentAlignment = Alignment.Center,
       ) {
@@ -664,30 +714,31 @@ private fun EmptyPapersState(
           imageVector = Icons.Default.DocumentScanner,
           contentDescription = null,
           tint = RoyalBlue,
-          modifier = Modifier.size(32.dp),
+          modifier = Modifier.size(22.dp),
         )
       }
 
-      Spacer(modifier = Modifier.height(16.dp))
+      Spacer(modifier = Modifier.height(12.dp))
 
       Text(
         text = "No Answer Sheets Scanned",
-        style = MaterialTheme.typography.titleMedium,
+        fontSize = 15.5.sp,
         fontWeight = FontWeight.Bold,
         color = TextPrimary,
         textAlign = TextAlign.Center,
       )
 
-      Spacer(modifier = Modifier.height(6.dp))
+      Spacer(modifier = Modifier.height(4.dp))
 
       Text(
         text = "Capture or upload $studentName's handwritten answer sheet pages to extract OCR text and run AI evaluation.",
-        style = MaterialTheme.typography.bodyMedium,
+        fontSize = 12.5.sp,
+        lineHeight = 17.5.sp,
         color = TextSecondary,
         textAlign = TextAlign.Center,
       )
 
-      Spacer(modifier = Modifier.height(20.dp))
+      Spacer(modifier = Modifier.height(16.dp))
 
       GradeScanPrimaryButton(
         text = "Scan First Answer Sheet",
@@ -699,6 +750,7 @@ private fun EmptyPapersState(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PaperCard(
   sheetNumber: Int,
@@ -734,81 +786,104 @@ private fun PaperCard(
       .testTag("paper_card_$paperId"),
     shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     border = BorderStroke(1.dp, BorderGray),
   ) {
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
+        .padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
       // 1. Header Row
       Row(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          verticalAlignment = Alignment.Top,
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
           modifier = Modifier.weight(1f),
         ) {
           Box(
             modifier = Modifier
-              .size(42.dp)
-              .clip(RoundedCornerShape(12.dp))
-              .background(LightBlueHighlight),
+              .size(38.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(LightBlueHighlight)
+              .border(1.dp, RoyalBlue.copy(alpha = 0.16f), RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center,
           ) {
             Icon(
               imageVector = Icons.Default.Description,
               contentDescription = null,
               tint = RoyalBlue,
-              modifier = Modifier.size(20.dp),
+              modifier = Modifier.size(18.dp),
             )
           }
 
-          Column {
-            Text(
-              text = "Answer Sheet #$sheetNumber",
-              style = MaterialTheme.typography.titleSmall,
-              fontWeight = FontWeight.Bold,
-              color = TextPrimary,
-            )
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            FlowRow(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+              Text(
+                text = "Answer Sheet #$sheetNumber",
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.CenterVertically),
+              )
+              Box(modifier = Modifier.align(Alignment.CenterVertically)) {
+                PaperStatusBadge(
+                  paperStatus = paper.status,
+                  evalStatus = paper.evaluation?.status,
+                  ocrStatus = paper.ocrStatus,
+                )
+              }
+            }
             val pageCount = if (pages.isNotEmpty()) pages.size else paper.totalPages
             Text(
               text = "${formatTimestamp(paper.createdAt)} • $pageCount ${if (pageCount == 1) "Page" else "Pages"}",
-              style = MaterialTheme.typography.bodySmall,
+              fontSize = 11.5.sp,
               color = TextSecondary,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
             )
           }
         }
 
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-          PaperStatusBadge(
-            paperStatus = paper.status,
-            evalStatus = paper.evaluation?.status,
-            ocrStatus = paper.ocrStatus,
-          )
+        Spacer(modifier = Modifier.width(6.dp))
 
-          IconButton(
-            onClick = onDeleteClick,
-            enabled = !isEvaluating,
+        Box(
+          modifier = Modifier
+            .size(48.dp)
+            .clickable(
+              enabled = !isEvaluating,
+              role = Role.Button,
+              onClick = onDeleteClick,
+            )
+            .testTag("delete_paper_$paperId"),
+          contentAlignment = Alignment.TopEnd,
+        ) {
+          Box(
             modifier = Modifier
-              .size(34.dp)
-              .clip(RoundedCornerShape(10.dp))
-              .background(StatusWarningContainer)
-              .testTag("delete_paper_$paperId"),
+              .size(32.dp)
+              .clip(RoundedCornerShape(8.dp))
+              .background(Color(0xFFF8FAFC))
+              .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
           ) {
             Icon(
               imageVector = Icons.Default.DeleteOutline,
               contentDescription = "Delete Answer Sheet",
-              tint = StatusWarning,
-              modifier = Modifier.size(18.dp),
+              tint = Color(0xFF94A3B8),
+              modifier = Modifier.size(16.dp),
             )
           }
         }
@@ -833,11 +908,11 @@ private fun PaperCard(
 
             Card(
               modifier = Modifier
-                .width(116.dp)
-                .aspectRatio(0.75f)
+                .width(112.dp)
+                .aspectRatio(0.74f)
                 .clickable { onSelectPage(page) }
                 .testTag("paper_page_${paperId}_${page.pageNumber}"),
-              shape = RoundedCornerShape(12.dp),
+              shape = RoundedCornerShape(10.dp),
               elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
               border = BorderStroke(
                 width = if (isSelected) 2.dp else 1.dp,
@@ -870,7 +945,7 @@ private fun PaperCard(
                       imageVector = Icons.Default.Description,
                       contentDescription = null,
                       tint = RoyalBlue.copy(alpha = 0.45f),
-                      modifier = Modifier.size(28.dp),
+                      modifier = Modifier.size(22.dp),
                     )
                   }
                 }
@@ -885,10 +960,9 @@ private fun PaperCard(
                 ) {
                   Text(
                     text = "Page ${page.pageNumber}",
-                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
-                    fontSize = 10.sp,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                   )
                 }
@@ -898,17 +972,22 @@ private fun PaperCard(
                   onClick = { onPreviewPage(page, signedUrl) },
                   modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.55f)),
+                    .size(48.dp),
                 ) {
-                  Icon(
-                    imageVector = Icons.Default.Visibility,
-                    contentDescription = "Preview Page ${page.pageNumber}",
-                    tint = Color.White,
-                    modifier = Modifier.size(13.dp),
-                  )
+                  Box(
+                    modifier = Modifier
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center,
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Visibility,
+                      contentDescription = "Preview Page ${page.pageNumber}",
+                      tint = Color.White,
+                      modifier = Modifier.size(14.dp),
+                    )
+                  }
                 }
 
                 // Bottom-left OCR status / trigger pill
@@ -950,10 +1029,9 @@ private fun PaperCard(
                         hasPageText -> "OCR ✓"
                         else -> "Run OCR"
                       },
-                      style = MaterialTheme.typography.labelSmall,
+                      fontSize = 9.5.sp,
                       fontWeight = FontWeight.SemiBold,
                       color = Color.White,
-                      fontSize = 9.sp,
                     )
                   }
                 }
@@ -985,11 +1063,11 @@ private fun PaperCard(
       if (!paper.combinedOcrText.isNullOrBlank()) {
         Surface(
           modifier = Modifier.fillMaxWidth(),
-          shape = RoundedCornerShape(12.dp),
+          shape = RoundedCornerShape(10.dp),
           color = LightBlueHighlight,
           border = BorderStroke(1.dp, BorderGray),
         ) {
-          Column(modifier = Modifier.padding(12.dp)) {
+          Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(
               modifier = Modifier
                 .fillMaxWidth()
@@ -998,6 +1076,7 @@ private fun PaperCard(
               verticalAlignment = Alignment.CenterVertically,
             ) {
               Row(
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
               ) {
@@ -1005,18 +1084,21 @@ private fun PaperCard(
                   imageVector = Icons.Default.TextSnippet,
                   contentDescription = null,
                   tint = RoyalBlue,
-                  modifier = Modifier.size(16.dp),
+                  modifier = Modifier.size(15.dp),
                 )
                 Text(
                   text = "Combined Answer Sheet Text (OCR)",
-                  style = MaterialTheme.typography.labelMedium,
+                  fontSize = 12.5.sp,
                   fontWeight = FontWeight.Bold,
                   color = TextPrimary,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
                 )
               }
+              Spacer(modifier = Modifier.width(8.dp))
               Text(
                 text = if (showCombinedOcr) "Hide" else "Show",
-                style = MaterialTheme.typography.labelSmall,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = RoyalBlue,
               )
@@ -1026,7 +1108,7 @@ private fun PaperCard(
               Surface(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .padding(top = 10.dp)
+                  .padding(top = 8.dp)
                   .heightIn(max = 180.dp),
                 shape = RoundedCornerShape(8.dp),
                 color = Color.White,
@@ -1034,10 +1116,9 @@ private fun PaperCard(
               ) {
                 Text(
                   text = paper.combinedOcrText,
-                  style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    lineHeight = 17.sp,
-                  ),
+                  fontSize = 12.sp,
+                  fontFamily = FontFamily.Monospace,
+                  lineHeight = 17.sp,
                   color = TextPrimary,
                   modifier = Modifier
                     .verticalScroll(rememberScrollState())
@@ -1054,7 +1135,7 @@ private fun PaperCard(
         modifier = Modifier
           .fillMaxWidth()
           .testTag("paper_evaluation_section_$paperId"),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         color = Color.White,
         border = BorderStroke(
           width = 1.dp,
@@ -1069,118 +1150,109 @@ private fun PaperCard(
         Column(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(14.dp),
-          verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
           Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
           ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(10.dp),
-              modifier = Modifier.weight(1f),
+            Box(
+              modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(
+                  when {
+                    isApproved -> StatusSuccessContainer
+                    isNeedsReview -> TertiaryAmberContainer
+                    else -> LightBlueHighlight
+                  }
+                ),
+              contentAlignment = Alignment.Center,
             ) {
-              Box(
-                modifier = Modifier
-                  .size(38.dp)
-                  .clip(RoundedCornerShape(10.dp))
-                  .background(
-                    when {
-                      isApproved -> StatusSuccessContainer
-                      isNeedsReview -> TertiaryAmberContainer
-                      else -> LightBlueHighlight
-                    }
-                  ),
-                contentAlignment = Alignment.Center,
-              ) {
-                if (isEvaluating) {
-                  CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = RoyalBlue,
-                  )
-                } else {
-                  Icon(
-                    imageVector = when {
-                      isApproved -> Icons.Default.Verified
-                      isNeedsReview -> Icons.Default.WarningAmber
-                      else -> Icons.Default.AutoAwesome
-                    },
-                    contentDescription = null,
-                    tint = when {
-                      isApproved -> StatusSuccess
-                      isNeedsReview -> StatusAmber
-                      else -> RoyalBlue
-                    },
-                    modifier = Modifier.size(20.dp),
-                  )
-                }
+              if (isEvaluating) {
+                CircularProgressIndicator(
+                  modifier = Modifier.size(16.dp),
+                  strokeWidth = 2.dp,
+                  color = RoyalBlue,
+                )
+              } else {
+                Icon(
+                  imageVector = when {
+                    isApproved -> Icons.Default.Verified
+                    isNeedsReview -> Icons.Default.WarningAmber
+                    else -> Icons.Default.AutoAwesome
+                  },
+                  contentDescription = null,
+                  tint = when {
+                    isApproved -> StatusSuccess
+                    isNeedsReview -> StatusAmber
+                    else -> RoyalBlue
+                  },
+                  modifier = Modifier.size(18.dp),
+                )
               }
+            }
 
-              Column {
-                Text(
-                  text = when {
-                    isEvaluating -> "AI Evaluation in Progress..."
-                    isApproved -> "Teacher Approved & Finalized"
-                    isNeedsReview -> "AI Evaluated • Teacher Review Needed"
-                    isCompletedEval -> "AI Evaluation Ready"
-                    else -> "AI Evaluation & Grading"
-                  },
-                  style = MaterialTheme.typography.titleSmall,
-                  fontWeight = FontWeight.Bold,
-                  color = TextPrimary,
-                )
-                Text(
-                  text = when {
-                    isEvaluating -> "Extracting answers & grading against class question paper"
-                    isApproved -> "Tap below to view the finalized question breakdown"
-                    isNeedsReview -> "Tap below to inspect answers, adjust marks, and approve"
-                    isCompletedEval -> "Tap below to review marks and finalize result"
-                    else -> "Run AI grading to evaluate handwritten answers automatically"
-                  },
-                  style = MaterialTheme.typography.bodySmall,
-                  color = TextSecondary,
-                  fontSize = 11.sp,
-                )
-              }
+            Column(
+              modifier = Modifier.weight(1f),
+              verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+              Text(
+                text = when {
+                  isEvaluating -> "AI Evaluation in Progress..."
+                  isApproved -> "Teacher Approved & Finalized"
+                  isNeedsReview -> "AI Evaluated • Teacher Review Needed"
+                  isCompletedEval -> "AI Evaluation Ready"
+                  else -> "AI Evaluation & Grading"
+                },
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+              )
+              Text(
+                text = when {
+                  isEvaluating -> "Extracting answers & grading against class question paper"
+                  isApproved -> "Tap below to view the finalized question breakdown"
+                  isNeedsReview -> "Tap below to inspect answers, adjust marks, and approve"
+                  isCompletedEval -> "Tap below to review marks and finalize result"
+                  else -> "Run AI grading to evaluate handwritten answers automatically"
+                },
+                fontSize = 11.5.sp,
+                lineHeight = 15.5.sp,
+                color = TextSecondary,
+              )
             }
           }
 
           if (isEvaluating) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(10.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            OutlinedButton(
+              onClick = onStopAiEvaluation,
+              shape = RoundedCornerShape(10.dp),
+              border = BorderStroke(1.dp, StatusWarning.copy(alpha = 0.4f)),
+              colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = StatusWarningContainer,
+                contentColor = StatusWarning,
+              ),
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(42.dp)
+                .testTag("stop_evaluate_$paperId"),
             ) {
-              OutlinedButton(
-                onClick = onStopAiEvaluation,
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, StatusWarning.copy(alpha = 0.4f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                  containerColor = StatusWarningContainer,
-                  contentColor = StatusWarning,
-                ),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .height(44.dp)
-                  .testTag("stop_evaluate_$paperId"),
-              ) {
-                Icon(
-                  imageVector = Icons.Default.StopCircle,
-                  contentDescription = null,
-                  tint = StatusWarning,
-                  modifier = Modifier.size(18.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                  text = "Stop Evaluation",
-                  style = MaterialTheme.typography.labelLarge,
-                  fontWeight = FontWeight.Bold,
-                  color = StatusWarning,
-                )
-              }
+              Icon(
+                imageVector = Icons.Default.StopCircle,
+                contentDescription = null,
+                tint = StatusWarning,
+                modifier = Modifier.size(16.dp),
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "Stop Evaluation",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = StatusWarning,
+              )
             }
           } else {
             val ctaLabel = when {
@@ -1192,25 +1264,25 @@ private fun PaperCard(
 
             Button(
               onClick = onRunAiEvaluation,
-              shape = RoundedCornerShape(12.dp),
+              shape = RoundedCornerShape(10.dp),
               colors = ButtonDefaults.buttonColors(
                 containerColor = RoyalBlue,
                 contentColor = Color.White,
               ),
               modifier = Modifier
                 .fillMaxWidth()
-                .height(46.dp)
+                .height(44.dp)
                 .testTag("evaluate_paper_$paperId"),
             ) {
               Icon(
                 imageVector = if (isApproved) Icons.Default.Verified else Icons.Default.AutoAwesome,
                 contentDescription = null,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
               )
-              Spacer(modifier = Modifier.width(8.dp))
+              Spacer(modifier = Modifier.width(6.dp))
               Text(
                 text = ctaLabel,
-                style = MaterialTheme.typography.labelLarge,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
               )
             }
@@ -1238,7 +1310,7 @@ private fun SelectedPageOcrPanel(
     modifier = Modifier
       .fillMaxWidth()
       .testTag("ocr_panel_page_${page.pageNumber}"),
-    shape = RoundedCornerShape(12.dp),
+    shape = RoundedCornerShape(10.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
     border = BorderStroke(
       width = 1.dp,
@@ -1256,35 +1328,40 @@ private fun SelectedPageOcrPanel(
         modifier = Modifier
           .fillMaxWidth()
           .background(LightBlueHighlight)
-          .padding(horizontal = 12.dp, vertical = 10.dp),
+          .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         Row(
+          modifier = Modifier.weight(1f),
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
           Icon(
             imageVector = Icons.Default.TextSnippet,
             contentDescription = null,
             tint = RoyalBlue,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(15.dp),
           )
           Text(
             text = "Page ${page.pageNumber} — Extracted Text",
-            style = MaterialTheme.typography.labelMedium,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
           )
         }
 
+        Spacer(modifier = Modifier.width(6.dp))
+
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
           if (!isRunning) {
             Surface(
-              shape = RoundedCornerShape(8.dp),
+              shape = RoundedCornerShape(6.dp),
               color = RoyalBlue,
               modifier = Modifier
                 .clickable(onClick = onRunOrRetryOcr)
@@ -1296,16 +1373,16 @@ private fun SelectedPageOcrPanel(
                   hasText -> "Re-extract"
                   else -> "Extract Page"
                 },
-                style = MaterialTheme.typography.labelSmall,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
               )
             }
           }
 
           Surface(
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(6.dp),
             color = Color.White,
             border = BorderStroke(1.dp, BorderGray),
             modifier = Modifier
@@ -1314,7 +1391,7 @@ private fun SelectedPageOcrPanel(
           ) {
             Text(
               text = "Close",
-              style = MaterialTheme.typography.labelSmall,
+              fontSize = 11.sp,
               fontWeight = FontWeight.SemiBold,
               color = TextSecondary,
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1329,32 +1406,32 @@ private fun SelectedPageOcrPanel(
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(12.dp),
+          .padding(10.dp),
       ) {
         when {
           isRunning -> {
             Row(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp),
+                .padding(vertical = 8.dp),
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(12.dp),
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
               CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
                 strokeWidth = 2.dp,
                 color = RoyalBlue,
               )
               Column {
                 Text(
                   text = "Running OCR on Page ${page.pageNumber}...",
-                  style = MaterialTheme.typography.bodyMedium,
+                  fontSize = 12.5.sp,
                   fontWeight = FontWeight.SemiBold,
                   color = TextPrimary,
                 )
                 Text(
                   text = "Transcribing student handwriting...",
-                  style = MaterialTheme.typography.bodySmall,
+                  fontSize = 11.5.sp,
                   color = TextSecondary,
                 )
               }
@@ -1365,26 +1442,27 @@ private fun SelectedPageOcrPanel(
             Row(
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 6.dp),
+                .padding(vertical = 4.dp),
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(10.dp),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
               Icon(
                 imageVector = Icons.Default.ErrorOutline,
                 contentDescription = null,
                 tint = StatusWarning,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
               )
               Column(modifier = Modifier.weight(1f)) {
                 Text(
                   text = "OCR Extraction Failed",
-                  style = MaterialTheme.typography.bodyMedium,
+                  fontSize = 12.5.sp,
                   fontWeight = FontWeight.Bold,
                   color = StatusWarning,
                 )
                 Text(
                   text = ocrError ?: "Could not extract text from this page. Tap 'Retry Page OCR' above.",
-                  style = MaterialTheme.typography.bodySmall,
+                  fontSize = 11.5.sp,
+                  lineHeight = 15.5.sp,
                   color = TextSecondary,
                 )
               }
@@ -1396,7 +1474,7 @@ private fun SelectedPageOcrPanel(
             Surface(
               modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 72.dp, max = 220.dp)
+                .heightIn(min = 68.dp, max = 200.dp)
                 .testTag("ocr_text_box_$pageId"),
               shape = RoundedCornerShape(8.dp),
               color = Color.White,
@@ -1404,10 +1482,9 @@ private fun SelectedPageOcrPanel(
             ) {
               Text(
                 text = ocrText.orEmpty(),
-                style = MaterialTheme.typography.bodySmall.copy(
-                  fontFamily = FontFamily.Monospace,
-                  lineHeight = 18.sp,
-                ),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 17.sp,
                 color = TextPrimary,
                 modifier = Modifier
                   .fillMaxWidth()
@@ -1420,7 +1497,8 @@ private fun SelectedPageOcrPanel(
           else -> {
             Text(
               text = "OCR has not been run on Page ${page.pageNumber} yet. Tap 'Extract Page' above to convert handwriting into text.",
-              style = MaterialTheme.typography.bodySmall,
+              fontSize = 12.sp,
+              lineHeight = 16.5.sp,
               color = TextSecondary,
               modifier = Modifier.padding(vertical = 4.dp),
             )
@@ -1442,27 +1520,27 @@ private fun EvaluationErrorDialog(
       modifier = Modifier
         .fillMaxWidth()
         .widthIn(max = 380.dp),
-      shape = RoundedCornerShape(24.dp),
+      shape = RoundedCornerShape(20.dp),
       color = Color.White,
       border = BorderStroke(1.dp, BorderGray),
       tonalElevation = 0.dp,
-      shadowElevation = 10.dp,
+      shadowElevation = 8.dp,
     ) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 22.dp, vertical = 22.dp),
+          .padding(horizontal = 20.dp, vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         Box(
           modifier = Modifier
-            .size(48.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .size(44.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(StatusWarningContainer)
             .border(
               width = 1.dp,
               color = StatusWarning.copy(alpha = 0.3f),
-              shape = RoundedCornerShape(14.dp),
+              shape = RoundedCornerShape(12.dp),
             ),
           contentAlignment = Alignment.Center,
         ) {
@@ -1470,15 +1548,15 @@ private fun EvaluationErrorDialog(
             imageVector = Icons.Default.ErrorOutline,
             contentDescription = null,
             tint = StatusWarning,
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier.size(20.dp),
           )
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Text(
           text = "AI Evaluation Issue",
-          fontSize = 18.sp,
+          fontSize = 16.sp,
           fontWeight = FontWeight.Bold,
           color = TextPrimary,
           textAlign = TextAlign.Center,
@@ -1488,13 +1566,13 @@ private fun EvaluationErrorDialog(
 
         Text(
           text = errorMessage,
-          fontSize = 13.sp,
+          fontSize = 12.5.sp,
           color = TextSecondary,
           textAlign = TextAlign.Center,
-          lineHeight = 19.sp,
+          lineHeight = 18.sp,
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -1502,7 +1580,7 @@ private fun EvaluationErrorDialog(
         ) {
           OutlinedButton(
             onClick = onDismiss,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
             border = BorderStroke(1.dp, BorderGray),
             colors = ButtonDefaults.outlinedButtonColors(
               containerColor = Color.White,
@@ -1510,18 +1588,18 @@ private fun EvaluationErrorDialog(
             ),
             modifier = Modifier
               .weight(1f)
-              .height(46.dp),
+              .height(44.dp),
           ) {
             Text(
               text = "Close",
-              fontSize = 14.sp,
+              fontSize = 13.5.sp,
               fontWeight = FontWeight.SemiBold,
             )
           }
 
           Button(
             onClick = onRetry,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(
               containerColor = Color.Transparent,
               contentColor = Color.White,
@@ -1529,8 +1607,8 @@ private fun EvaluationErrorDialog(
             contentPadding = PaddingValues(0.dp),
             modifier = Modifier
               .weight(1.2f)
-              .height(46.dp)
-              .clip(RoundedCornerShape(12.dp))
+              .height(44.dp)
+              .clip(RoundedCornerShape(10.dp))
               .background(
                 Brush.horizontalGradient(
                   colors = listOf(RoyalBlue, DarkRoyalBlue)
@@ -1539,7 +1617,7 @@ private fun EvaluationErrorDialog(
           ) {
             Text(
               text = "Retry",
-              fontSize = 14.sp,
+              fontSize = 13.5.sp,
               fontWeight = FontWeight.SemiBold,
               color = Color.White,
             )
@@ -1607,7 +1685,7 @@ private fun PaperStatusBadge(
     color = containerColor,
   ) {
     Row(
-      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -1615,11 +1693,11 @@ private fun PaperStatusBadge(
         imageVector = icon,
         contentDescription = null,
         tint = contentColor,
-        modifier = Modifier.size(13.dp),
+        modifier = Modifier.size(12.dp),
       )
       Text(
         text = label,
-        style = MaterialTheme.typography.labelSmall,
+        fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         color = contentColor,
       )
@@ -1648,16 +1726,16 @@ private fun FullscreenPagePreviewDialog(
       modifier = Modifier
         .fillMaxWidth()
         .widthIn(max = 520.dp),
-      shape = RoundedCornerShape(24.dp),
+      shape = RoundedCornerShape(20.dp),
       colors = CardDefaults.cardColors(containerColor = Color.White),
       border = BorderStroke(1.dp, BorderGray),
-      elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+      elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
     ) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+          .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -1665,13 +1743,14 @@ private fun FullscreenPagePreviewDialog(
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
           Row(
+            modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
           ) {
             Box(
               modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .size(34.dp)
+                .clip(RoundedCornerShape(9.dp))
                 .background(LightBlueHighlight),
               contentAlignment = Alignment.Center,
             ) {
@@ -1679,19 +1758,19 @@ private fun FullscreenPagePreviewDialog(
                 imageVector = Icons.Default.DocumentScanner,
                 contentDescription = null,
                 tint = RoyalBlue,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
               )
             }
             Column {
               Text(
                 text = "Page ${page.pageNumber} Preview",
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary,
               )
               Text(
                 text = if (!ocrText.isNullOrBlank()) "OCR Extracted" else "Handwritten Page",
-                fontSize = 12.sp,
+                fontSize = 11.5.sp,
                 color = TextSecondary,
               )
             }
@@ -1699,7 +1778,7 @@ private fun FullscreenPagePreviewDialog(
 
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
           ) {
             if (!isOcrRunning) {
               Surface(
@@ -1710,28 +1789,33 @@ private fun FullscreenPagePreviewDialog(
               ) {
                 Text(
                   text = if (!ocrText.isNullOrBlank()) "Re-run OCR" else "Extract OCR",
-                  fontSize = 12.sp,
+                  fontSize = 11.5.sp,
                   fontWeight = FontWeight.SemiBold,
                   color = RoyalBlue,
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
               }
             }
 
             IconButton(
               onClick = onDismiss,
-              modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(LightBlueHighlight)
-                .border(1.dp, BorderGray, CircleShape),
+              modifier = Modifier.size(48.dp),
             ) {
-              Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Close Preview",
-                tint = TextSecondary,
-                modifier = Modifier.size(16.dp),
-              )
+              Box(
+                modifier = Modifier
+                  .size(30.dp)
+                  .clip(CircleShape)
+                  .background(LightBlueHighlight)
+                  .border(1.dp, BorderGray, CircleShape),
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Close,
+                  contentDescription = "Close Preview",
+                  tint = TextSecondary,
+                  modifier = Modifier.size(15.dp),
+                )
+              }
             }
           }
         }
@@ -1740,9 +1824,9 @@ private fun FullscreenPagePreviewDialog(
           modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(0.72f)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(LightBlueHighlight)
-            .border(1.dp, BorderGray, RoundedCornerShape(14.dp)),
+            .border(1.dp, BorderGray, RoundedCornerShape(12.dp)),
           contentAlignment = Alignment.Center,
         ) {
           if (!imageUrl.isNullOrBlank()) {
@@ -1755,7 +1839,7 @@ private fun FullscreenPagePreviewDialog(
           } else {
             Text(
               text = "Loading page image...",
-              fontSize = 13.sp,
+              fontSize = 12.5.sp,
               color = TextSecondary,
             )
           }
@@ -1764,7 +1848,7 @@ private fun FullscreenPagePreviewDialog(
         if (!ocrText.isNullOrBlank()) {
           Text(
             text = "Extracted Text:",
-            fontSize = 12.5.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = TextPrimary,
           )
@@ -1772,15 +1856,15 @@ private fun FullscreenPagePreviewDialog(
             modifier = Modifier
               .fillMaxWidth()
               .heightIn(max = 120.dp),
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(8.dp),
             color = Color.White,
             border = BorderStroke(1.dp, BorderGray),
           ) {
             Text(
               text = ocrText,
-              style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = FontFamily.Monospace
-              ),
+              fontSize = 12.sp,
+              fontFamily = FontFamily.Monospace,
+              lineHeight = 16.5.sp,
               color = TextPrimary,
               modifier = Modifier
                 .verticalScroll(rememberScrollState())

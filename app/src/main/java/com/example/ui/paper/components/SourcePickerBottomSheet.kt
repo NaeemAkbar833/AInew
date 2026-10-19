@@ -84,7 +84,7 @@ fun SourcePickerBottomSheet(
   ModalBottomSheet(
     onDismissRequest = onDismiss,
     sheetState = sheetState,
-    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
     containerColor = Color.White,
     scrimColor = Color.Black.copy(alpha = 0.45f),
     tonalElevation = 0.dp,
@@ -94,12 +94,12 @@ fun SourcePickerBottomSheet(
         modifier = Modifier
           .fillMaxWidth()
           .background(Color.White)
-          .padding(top = 10.dp, bottom = 4.dp),
+          .padding(top = 8.dp, bottom = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
       ) {
         Box(
           modifier = Modifier
-            .width(36.dp)
+            .width(34.dp)
             .height(4.dp)
             .clip(CircleShape)
             .background(BorderGray)
@@ -120,19 +120,19 @@ fun SourcePickerBottomSheet(
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
+          .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
           modifier = Modifier.weight(1f),
         ) {
           Box(
             modifier = Modifier
-              .size(40.dp)
-              .clip(RoundedCornerShape(12.dp))
+              .size(36.dp)
+              .clip(RoundedCornerShape(10.dp))
               .background(headerGradient),
             contentAlignment = Alignment.Center,
           ) {
@@ -140,21 +140,26 @@ fun SourcePickerBottomSheet(
               imageVector = Icons.Default.DocumentScanner,
               contentDescription = null,
               tint = Color.White,
-              modifier = Modifier.size(20.dp),
+              modifier = Modifier.size(18.dp),
             )
           }
 
-          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+          ) {
             Text(
               text = title,
-              fontSize = 18.sp,
+              fontSize = 16.sp,
+              lineHeight = 20.sp,
               fontWeight = FontWeight.Bold,
               color = TextPrimary,
               letterSpacing = (-0.2).sp,
             )
             Text(
               text = subtitle,
-              fontSize = 12.sp,
+              fontSize = 11.5.sp,
+              lineHeight = 15.5.sp,
               fontWeight = FontWeight.Normal,
               color = TextSecondary,
             )
@@ -164,7 +169,7 @@ fun SourcePickerBottomSheet(
         // Subtle Close Icon Button
         Box(
           modifier = Modifier
-            .size(32.dp)
+            .size(30.dp)
             .clip(CircleShape)
             .background(LightBlueHighlight)
             .border(1.dp, BorderGray, CircleShape)
@@ -179,7 +184,7 @@ fun SourcePickerBottomSheet(
             imageVector = Icons.Default.Close,
             contentDescription = "Close",
             tint = TextSecondary,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(15.dp),
           )
         }
       }
@@ -195,8 +200,8 @@ fun SourcePickerBottomSheet(
           .weight(1f, fill = false)
           .fillMaxWidth()
           .verticalScroll(rememberScrollState())
-          .padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         SourceOptionCard(
           title = "Take Photo",
@@ -229,27 +234,27 @@ fun SourcePickerBottomSheet(
         Row(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
           horizontalArrangement = Arrangement.Center,
           verticalAlignment = Alignment.CenterVertically,
         ) {
           OutlinedButton(
             onClick = onDismiss,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
             border = BorderStroke(1.dp, BorderGray),
             colors = ButtonDefaults.outlinedButtonColors(
               containerColor = Color.White,
               contentColor = TextPrimary,
             ),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
             modifier = Modifier
               .fillMaxWidth()
-              .height(46.dp)
+              .height(44.dp)
               .testTag("source_cancel_button"),
           ) {
             Text(
               text = "Cancel",
-              fontSize = 14.sp,
+              fontSize = 13.5.sp,
               fontWeight = FontWeight.SemiBold,
               color = TextPrimary,
             )
@@ -283,13 +288,13 @@ private fun SourceOptionCard(
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 14.dp, vertical = 12.dp),
+        .padding(horizontal = 12.dp, vertical = 11.dp),
       verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
       Box(
         modifier = Modifier
-          .size(40.dp)
+          .size(38.dp)
           .clip(RoundedCornerShape(10.dp))
           .background(LightBlueHighlight)
           .border(
@@ -303,7 +308,7 @@ private fun SourceOptionCard(
           imageVector = icon,
           contentDescription = null,
           tint = RoyalBlue,
-          modifier = Modifier.size(20.dp),
+          modifier = Modifier.size(18.dp),
         )
       }
 
@@ -313,13 +318,14 @@ private fun SourceOptionCard(
       ) {
         Text(
           text = title,
-          fontSize = 14.sp,
+          fontSize = 13.5.sp,
           fontWeight = FontWeight.SemiBold,
           color = TextPrimary,
         )
         Text(
           text = description,
-          fontSize = 12.sp,
+          fontSize = 11.5.sp,
+          lineHeight = 15.5.sp,
           fontWeight = FontWeight.Normal,
           color = TextSecondary,
         )
@@ -327,7 +333,7 @@ private fun SourceOptionCard(
 
       Box(
         modifier = Modifier
-          .size(28.dp)
+          .size(26.dp)
           .clip(CircleShape)
           .background(LightBlueHighlight),
         contentAlignment = Alignment.Center,
@@ -336,7 +342,7 @@ private fun SourceOptionCard(
           imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
           contentDescription = null,
           tint = RoyalBlue,
-          modifier = Modifier.size(18.dp),
+          modifier = Modifier.size(16.dp),
         )
       }
     }

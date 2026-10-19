@@ -105,7 +105,7 @@ private fun SplashScreenContent(scale: Float, alpha: Float) {
   val pulseScale by
     infiniteTransition.animateFloat(
       initialValue = 0.96f,
-      targetValue = 1.06f,
+      targetValue = 1.05f,
       animationSpec =
         infiniteRepeatable(
           animation = tween(1600, easing = FastOutSlowInEasing),
@@ -121,49 +121,49 @@ private fun SplashScreenContent(scale: Float, alpha: Float) {
   ) {
     Box(
       modifier =
-        Modifier.size(280.dp)
-          .offset(x = 110.dp, y = (-200).dp)
-          .background(color = Color.White.copy(alpha = 0.08f), shape = CircleShape)
+        Modifier.size(220.dp)
+          .offset(x = 100.dp, y = (-180).dp)
+          .background(color = Color.White.copy(alpha = 0.07f), shape = CircleShape)
     )
     Box(
       modifier =
-        Modifier.size(220.dp)
-          .offset(x = (-100).dp, y = 220.dp)
-          .background(color = Color.White.copy(alpha = 0.06f), shape = CircleShape)
+        Modifier.size(180.dp)
+          .offset(x = (-90).dp, y = 190.dp)
+          .background(color = Color.White.copy(alpha = 0.05f), shape = CircleShape)
     )
 
     Column(
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.Center,
-      modifier = Modifier.scale(scale).alpha(alpha).padding(horizontal = 32.dp),
+      modifier = Modifier.scale(scale).alpha(alpha).padding(horizontal = 28.dp),
     ) {
       Box(contentAlignment = Alignment.Center) {
         Box(
           modifier =
-            Modifier.size(134.dp)
+            Modifier.size(96.dp)
               .scale(pulseScale)
               .background(
                 color = Color.White.copy(alpha = 0.14f),
-                shape = RoundedCornerShape(36.dp),
+                shape = RoundedCornerShape(26.dp),
               )
         )
         Surface(
-          modifier = Modifier.size(110.dp),
-          shape = RoundedCornerShape(30.dp),
+          modifier = Modifier.size(80.dp),
+          shape = RoundedCornerShape(22.dp),
           color = Color.White,
-          shadowElevation = 16.dp,
+          shadowElevation = 10.dp,
         ) {
           Box(contentAlignment = Alignment.Center) {
             Surface(
-              modifier = Modifier.size(82.dp),
-              shape = RoundedCornerShape(22.dp),
+              modifier = Modifier.size(58.dp),
+              shape = RoundedCornerShape(16.dp),
               color = RoyalBlue.copy(alpha = 0.10f),
             ) {
               Box(contentAlignment = Alignment.Center) {
                 Icon(
                   imageVector = Icons.Default.DocumentScanner,
                   contentDescription = "GradeScan Logo",
-                  modifier = Modifier.size(48.dp),
+                  modifier = Modifier.size(32.dp),
                   tint = RoyalBlue,
                 )
               }
@@ -172,7 +172,7 @@ private fun SplashScreenContent(scale: Float, alpha: Float) {
         }
       }
 
-      Spacer(modifier = Modifier.height(28.dp))
+      Spacer(modifier = Modifier.height(22.dp))
 
       Surface(
         color = Color.White.copy(alpha = 0.16f),
@@ -182,37 +182,38 @@ private fun SplashScreenContent(scale: Float, alpha: Float) {
         Text(
           text = "AI EXAM EVALUATION",
           fontFamily = BricolageGrotesqueFontFamily,
-          fontSize = 11.sp,
+          fontSize = 10.5.sp,
           fontWeight = FontWeight.Bold,
           color = Color.White,
-          letterSpacing = 1.2.sp,
-          modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+          letterSpacing = 1.sp,
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
         )
       }
 
-      Spacer(modifier = Modifier.height(14.dp))
+      Spacer(modifier = Modifier.height(10.dp))
 
       Text(
         text = "GradeScan",
         fontFamily = BricolageGrotesqueFontFamily,
-        fontSize = 36.sp,
-        fontWeight = FontWeight.ExtraBold,
+        fontSize = 28.sp,
+        fontWeight = FontWeight.Bold,
         color = Color.White,
-        letterSpacing = (-0.5).sp,
+        letterSpacing = (-0.4).sp,
       )
 
-      Spacer(modifier = Modifier.height(8.dp))
+      Spacer(modifier = Modifier.height(6.dp))
 
       Text(
         text = "Smart Answer Sheet Scanning & Instant Grading",
         fontFamily = FigtreeFontFamily,
-        fontSize = 14.sp,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
         color = Color.White.copy(alpha = 0.88f),
         fontWeight = FontWeight.Medium,
         textAlign = TextAlign.Center,
       )
 
-      Spacer(modifier = Modifier.height(48.dp))
+      Spacer(modifier = Modifier.height(32.dp))
 
       Surface(
         color = Color.White.copy(alpha = 0.14f),
@@ -220,14 +221,14 @@ private fun SplashScreenContent(scale: Float, alpha: Float) {
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
       ) {
         Row(
-          modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+          modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
           CircularProgressIndicator(
-            modifier = Modifier.size(18.dp).testTag("splash_loading_indicator"),
+            modifier = Modifier.size(16.dp).testTag("splash_loading_indicator"),
             color = Color.White,
-            strokeWidth = 2.2.dp,
+            strokeWidth = 2.dp,
           )
           Text(
             text = "Preparing workspace...",

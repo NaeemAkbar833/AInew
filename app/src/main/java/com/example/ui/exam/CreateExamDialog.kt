@@ -2,12 +2,17 @@ package com.example.ui.exam
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -19,10 +24,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
@@ -36,10 +41,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -54,18 +56,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Exam
 import com.example.data.model.ExamType
 import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
 import com.example.ui.theme.DarkRoyalBlue
 import com.example.ui.theme.DisabledBackground
+import com.example.ui.theme.FigtreeFontFamily
 import com.example.ui.theme.LightBlueHighlight
 import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.SoftBlueTint
 import com.example.ui.theme.StatusWarning
 import com.example.ui.theme.StatusWarningContainer
 import com.example.ui.theme.TextPrimary
@@ -102,6 +111,9 @@ fun CreateExamDialog(
   val saveButtonBrush = Brush.horizontalGradient(
     colors = listOf(DarkRoyalBlue, RoyalBlue)
   )
+  val disabledButtonBrush = Brush.horizontalGradient(
+    colors = listOf(DisabledBackground, DisabledBackground)
+  )
 
   fun safeDismiss() {
     if (!uiState.isCreating) {
@@ -115,7 +127,7 @@ fun CreateExamDialog(
   ModalBottomSheet(
     onDismissRequest = { if (!uiState.isCreating) onDismissRequest() },
     sheetState = sheetState,
-    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
     containerColor = Color.White,
     tonalElevation = 2.dp,
     scrimColor = Color.Black.copy(alpha = 0.4f),
@@ -144,11 +156,11 @@ fun CreateExamDialog(
         .navigationBarsPadding()
         .imePadding(),
     ) {
-      // Header
+      // Compact Header
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 20.dp)
+          .padding(horizontal = 16.dp)
           .padding(bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -156,12 +168,14 @@ fun CreateExamDialog(
         Row(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(10.dp),
-          modifier = Modifier.weight(1f),
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 8.dp),
         ) {
           Surface(
             shape = RoundedCornerShape(10.dp),
             color = LightBlueHighlight,
-            modifier = Modifier.size(38.dp),
+            modifier = Modifier.size(36.dp),
           ) {
             Box(contentAlignment = Alignment.Center) {
               Icon(
@@ -175,15 +189,15 @@ fun CreateExamDialog(
           Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(
               text = "Create Exam",
-              style = MaterialTheme.typography.titleLarge.copy(
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-              ),
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 16.sp,
+              fontWeight = FontWeight.Bold,
               color = TextPrimary,
             )
             Text(
               text = "Set up details for your upcoming exam.",
-              style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 12.sp,
               color = TextSecondary,
             )
           }
@@ -213,8 +227,8 @@ fun CreateExamDialog(
           .fillMaxWidth()
           .weight(1f, fill = false)
           .verticalScroll(scrollState)
-          .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+          .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
         if (uiState.createErrorMessage != null) {
           Card(
@@ -236,80 +250,45 @@ fun CreateExamDialog(
               Spacer(modifier = Modifier.width(8.dp))
               Text(
                 text = uiState.createErrorMessage,
-                style = MaterialTheme.typography.bodySmall.copy(
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.Medium,
-                  color = StatusWarning,
-                ),
+                fontFamily = FigtreeFontFamily,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = StatusWarning,
               )
             }
           }
         }
 
-        // Exam Name
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Exam Name (supports 2-line wrapping for long exam names)
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
           Text(
             text = "Exam Name",
-            style = MaterialTheme.typography.labelMedium.copy(
-              fontSize = 13.sp,
-              fontWeight = FontWeight.SemiBold,
-            ),
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
             color = TextPrimary,
           )
-          OutlinedTextField(
+          CompactExamTextField(
             value = examName,
             onValueChange = { examName = it },
-            placeholder = {
-              Text(
-                text = "e.g. Midterm Examination 2026",
-                fontSize = 14.sp,
-                color = TextSecondary,
-              )
-            },
-            leadingIcon = {
-              Icon(
-                imageVector = Icons.Default.Description,
-                contentDescription = null,
-                tint = RoyalBlue,
-                modifier = Modifier.size(18.dp),
-              )
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = RoyalBlue,
-              unfocusedBorderColor = BorderGray,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary,
-              cursorColor = RoyalBlue,
-              focusedContainerColor = Color.White,
-              unfocusedContainerColor = Color.White,
-            ),
-            modifier = Modifier.fillMaxWidth(),
+            placeholder = "e.g. Midterm Examination 2026",
+            leadingIcon = Icons.Default.Description,
+            enabled = !uiState.isCreating,
+            singleLine = false,
+            maxLines = 2,
           )
         }
 
         // Exam Type Selector
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            Icon(
-              imageVector = Icons.Default.Category,
-              contentDescription = null,
-              tint = TextSecondary,
-              modifier = Modifier.size(16.dp),
-            )
-            Text(
-              text = "Exam Type",
-              style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-              ),
-              color = TextPrimary,
-            )
-          }
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+          Text(
+            text = "Exam Type",
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary,
+          )
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -317,38 +296,43 @@ fun CreateExamDialog(
             ExamType.entries.forEach { type ->
               val isSelected = selectedType == type
               Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isSelected) LightBlueHighlight else Color.White,
+                shape = RoundedCornerShape(10.dp),
+                color = if (isSelected) LightBlueHighlight else SoftBlueTint,
                 border = BorderStroke(
                   width = 1.dp,
                   color = if (isSelected) RoyalBlue else BorderGray,
                 ),
                 modifier = Modifier
                   .weight(1f)
-                  .height(42.dp)
-                  .clip(RoundedCornerShape(12.dp))
+                  .height(38.dp)
+                  .clip(RoundedCornerShape(10.dp))
                   .clickable(enabled = !uiState.isCreating) { selectedType = type },
               ) {
-                Box(contentAlignment = Alignment.Center) {
-                  Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isSelected) {
-                      Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = null,
-                        tint = DarkRoyalBlue,
-                        modifier = Modifier.size(14.dp),
-                      )
-                      Spacer(Modifier.width(4.dp))
-                    }
-                    Text(
-                      text = type.displayName,
-                      style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                      ),
-                      color = if (isSelected) DarkRoyalBlue else TextPrimary,
+                Row(
+                  modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 6.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.Center,
+                ) {
+                  if (isSelected) {
+                    Icon(
+                      imageVector = Icons.Default.Check,
+                      contentDescription = null,
+                      tint = DarkRoyalBlue,
+                      modifier = Modifier.size(13.dp),
                     )
+                    Spacer(Modifier.width(3.dp))
                   }
+                  Text(
+                    text = type.displayName,
+                    fontFamily = FigtreeFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) DarkRoyalBlue else TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
                 }
               }
             }
@@ -356,38 +340,22 @@ fun CreateExamDialog(
         }
 
         // Exam Date
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
           Text(
             text = "Exam Date",
-            style = MaterialTheme.typography.labelMedium.copy(
-              fontSize = 13.sp,
-              fontWeight = FontWeight.SemiBold,
-            ),
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
             color = TextPrimary,
           )
-          OutlinedTextField(
+          CompactExamTextField(
             value = examDate,
             onValueChange = { examDate = it },
-            leadingIcon = {
-              Icon(
-                imageVector = Icons.Default.CalendarToday,
-                contentDescription = null,
-                tint = RoyalBlue,
-                modifier = Modifier.size(18.dp),
-              )
-            },
+            placeholder = "YYYY-MM-DD",
+            leadingIcon = Icons.Default.CalendarToday,
+            enabled = !uiState.isCreating,
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = RoyalBlue,
-              unfocusedBorderColor = BorderGray,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary,
-              cursorColor = RoyalBlue,
-              focusedContainerColor = Color.White,
-              unfocusedContainerColor = Color.White,
-            ),
-            modifier = Modifier.fillMaxWidth(),
+            maxLines = 1,
           )
         }
       }
@@ -399,28 +367,27 @@ fun CreateExamDialog(
         modifier = Modifier
           .fillMaxWidth()
           .background(Color.White)
-          .padding(horizontal = 20.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Surface(
-          shape = RoundedCornerShape(50),
+          shape = RoundedCornerShape(12.dp),
           color = Color.White,
           border = BorderStroke(1.dp, BorderGray),
           modifier = Modifier
             .weight(1f)
-            .height(46.dp)
-            .clip(RoundedCornerShape(50))
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = !uiState.isCreating) { safeDismiss() },
         ) {
           Box(contentAlignment = Alignment.Center) {
             Text(
               text = "Cancel",
-              style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary,
-              ),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 13.5.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = TextPrimary,
             )
           }
         }
@@ -434,12 +401,13 @@ fun CreateExamDialog(
             }
           },
           enabled = !uiState.isCreating,
-          shape = RoundedCornerShape(50),
+          shape = RoundedCornerShape(12.dp),
+          contentPadding = PaddingValues(),
           modifier = Modifier
             .weight(1f)
-            .height(46.dp)
-            .clip(RoundedCornerShape(50))
-            .background(saveButtonBrush),
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (!uiState.isCreating) saveButtonBrush else disabledButtonBrush),
           colors = ButtonDefaults.buttonColors(
             containerColor = Color.Transparent,
             disabledContainerColor = Color.Transparent,
@@ -454,15 +422,92 @@ fun CreateExamDialog(
           } else {
             Text(
               text = "Save Exam",
-              style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-              ),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 13.5.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = Color.White,
             )
           }
         }
       }
     }
   }
+}
+
+@Composable
+private fun CompactExamTextField(
+  value: String,
+  onValueChange: (String) -> Unit,
+  placeholder: String,
+  leadingIcon: ImageVector,
+  enabled: Boolean,
+  singleLine: Boolean,
+  maxLines: Int,
+  modifier: Modifier = Modifier,
+) {
+  val interactionSource = remember { MutableInteractionSource() }
+  val isFocused by interactionSource.collectIsFocusedAsState()
+  val shape = RoundedCornerShape(10.dp)
+  val borderColor = if (isFocused) RoyalBlue else BorderGray
+  val containerColor = if (isFocused) Color.White else SoftBlueTint
+  val iconTint = if (isFocused || value.isNotBlank()) RoyalBlue else TextSecondary
+
+  BasicTextField(
+    value = value,
+    onValueChange = onValueChange,
+    enabled = enabled,
+    singleLine = singleLine,
+    maxLines = maxLines,
+    interactionSource = interactionSource,
+    textStyle = TextStyle(
+      fontFamily = FigtreeFontFamily,
+      fontSize = 13.5.sp,
+      lineHeight = 18.sp,
+      fontWeight = FontWeight.Normal,
+      color = TextPrimary,
+    ),
+    cursorBrush = SolidColor(RoyalBlue),
+    modifier = modifier
+      .fillMaxWidth()
+      .heightIn(min = 44.dp),
+    decorationBox = { innerTextField ->
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(shape)
+          .background(containerColor)
+          .border(
+            width = if (isFocused) 1.5.dp else 1.dp,
+            color = borderColor,
+            shape = shape,
+          )
+          .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Icon(
+          imageVector = leadingIcon,
+          contentDescription = null,
+          tint = iconTint,
+          modifier = Modifier.size(16.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Box(
+          modifier = Modifier.weight(1f),
+          contentAlignment = Alignment.CenterStart,
+        ) {
+          if (value.isEmpty()) {
+            Text(
+              text = placeholder,
+              fontFamily = FigtreeFontFamily,
+              fontSize = 13.sp,
+              color = TextSecondary,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+          innerTextField()
+        }
+      }
+    },
+  )
 }

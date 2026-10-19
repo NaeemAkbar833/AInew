@@ -9,9 +9,9 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -40,7 +40,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -69,10 +68,13 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Student
 import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
 import com.example.ui.theme.DarkRoyalBlue
 import com.example.ui.theme.DisabledBackground
+import com.example.ui.theme.FigtreeFontFamily
 import com.example.ui.theme.LightBlueHighlight
 import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.SoftBlueTint
 import com.example.ui.theme.StatusWarning
 import com.example.ui.theme.StatusWarningContainer
 import com.example.ui.theme.TextPrimary
@@ -115,7 +117,7 @@ fun AddStudentDialog(
       if (!uiState.isAdding) onDismissRequest()
     },
     sheetState = sheetState,
-    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
     containerColor = Color.White,
     tonalElevation = 2.dp,
     scrimColor = Color.Black.copy(alpha = 0.4f),
@@ -148,7 +150,7 @@ fun AddStudentDialog(
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 20.dp)
+          .padding(horizontal = 16.dp)
           .padding(bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -156,12 +158,14 @@ fun AddStudentDialog(
         Row(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(10.dp),
-          modifier = Modifier.weight(1f),
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 8.dp),
         ) {
           Surface(
             shape = RoundedCornerShape(10.dp),
             color = LightBlueHighlight,
-            modifier = Modifier.size(38.dp),
+            modifier = Modifier.size(36.dp),
           ) {
             Box(contentAlignment = Alignment.Center) {
               Icon(
@@ -175,15 +179,15 @@ fun AddStudentDialog(
           Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(
               text = "Add Student",
-              style = MaterialTheme.typography.titleMedium.copy(
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-              ),
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 16.sp,
+              fontWeight = FontWeight.Bold,
               color = TextPrimary,
             )
             Text(
               text = "Enter the student's details",
-              style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 12.sp,
               color = TextSecondary,
             )
           }
@@ -221,31 +225,35 @@ fun AddStudentDialog(
           .fillMaxWidth()
           .weight(1f, fill = false)
           .verticalScroll(scrollState)
-          .padding(horizontal = 20.dp, vertical = 14.dp),
+          .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
-        // 1. Student Name
+        // 1. Student Name (supports 2-line wrapping for full names)
         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
           StudentFieldLabel(text = "Student Name")
           CompactStudentTextField(
             value = name,
             onValueChange = { name = it },
-            placeholder = "e.g. John Doe",
+            placeholder = "e.g. Muhammad Imtiaz Ahmed",
             leadingIcon = Icons.Default.Person,
             enabled = !uiState.isAdding,
+            singleLine = false,
+            maxLines = 2,
             modifier = Modifier.testTag("student_name_input"),
           )
         }
 
-        // 2. Father's Name
+        // 2. Father's Name (supports 2-line wrapping for full names)
         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
           StudentFieldLabel(text = "Father's Name")
           CompactStudentTextField(
             value = fatherName,
             onValueChange = { fatherName = it },
-            placeholder = "e.g. Robert Doe",
+            placeholder = "e.g. Abdul Rehman Khan",
             leadingIcon = Icons.Default.SupervisorAccount,
             enabled = !uiState.isAdding,
+            singleLine = false,
+            maxLines = 2,
             modifier = Modifier.testTag("student_father_name_input"),
           )
         }
@@ -259,6 +267,8 @@ fun AddStudentDialog(
             placeholder = "e.g. CS-2023-01",
             leadingIcon = Icons.Default.Badge,
             enabled = !uiState.isAdding,
+            singleLine = true,
+            maxLines = 1,
             modifier = Modifier.testTag("student_roll_number_input"),
           )
         }
@@ -287,11 +297,11 @@ fun AddStudentDialog(
               Spacer(modifier = Modifier.width(8.dp))
               Text(
                 text = errorMessage,
-                style = MaterialTheme.typography.bodySmall.copy(
-                  fontSize = 12.sp,
-                  fontWeight = FontWeight.Medium,
-                  color = StatusWarning,
-                ),
+                fontFamily = FigtreeFontFamily,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = StatusWarning,
               )
             }
           }
@@ -305,18 +315,18 @@ fun AddStudentDialog(
         modifier = Modifier
           .fillMaxWidth()
           .background(Color.White)
-          .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+          .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Surface(
-          shape = RoundedCornerShape(50),
+          shape = RoundedCornerShape(12.dp),
           color = Color.White,
           border = BorderStroke(1.dp, BorderGray),
           modifier = Modifier
             .weight(1f)
-            .height(45.dp)
-            .clip(RoundedCornerShape(50))
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = !uiState.isAdding) {
               coroutineScope.launch {
                 sheetState.hide()
@@ -328,11 +338,10 @@ fun AddStudentDialog(
           Box(contentAlignment = Alignment.Center) {
             Text(
               text = "Cancel",
-              style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary,
-              ),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 13.5.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = TextPrimary,
             )
           }
         }
@@ -353,15 +362,16 @@ fun AddStudentDialog(
             )
           },
           enabled = !uiState.isAdding,
-          shape = RoundedCornerShape(50),
+          shape = RoundedCornerShape(12.dp),
+          contentPadding = PaddingValues(),
           colors = ButtonDefaults.buttonColors(
             containerColor = Color.Transparent,
             disabledContainerColor = Color.Transparent,
           ),
           modifier = Modifier
             .weight(1f)
-            .height(45.dp)
-            .clip(RoundedCornerShape(50))
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(
               brush = if (!uiState.isAdding) {
                 saveButtonBrush
@@ -380,11 +390,10 @@ fun AddStudentDialog(
           } else {
             Text(
               text = "Add Student",
-              style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-              ),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 13.5.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = Color.White,
             )
           }
         }
@@ -400,10 +409,9 @@ private fun StudentFieldLabel(
 ) {
   Text(
     text = text,
-    style = MaterialTheme.typography.labelMedium.copy(
-      fontSize = 12.5.sp,
-      fontWeight = FontWeight.Medium,
-    ),
+    fontFamily = FigtreeFontFamily,
+    fontSize = 12.5.sp,
+    fontWeight = FontWeight.SemiBold,
     color = TextPrimary,
     modifier = modifier,
   )
@@ -417,48 +425,55 @@ private fun CompactStudentTextField(
   leadingIcon: ImageVector,
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
+  singleLine: Boolean = true,
+  maxLines: Int = 1,
 ) {
   val interactionSource = remember { MutableInteractionSource() }
   val isFocused by interactionSource.collectIsFocusedAsState()
+  val shape = RoundedCornerShape(10.dp)
   val borderColor = if (isFocused) RoyalBlue else BorderGray
-  val iconTint = if (isFocused) RoyalBlue else TextSecondary
+  val containerColor = if (isFocused) Color.White else SoftBlueTint
+  val iconTint = if (isFocused || value.isNotBlank()) RoyalBlue else TextSecondary
 
   BasicTextField(
     value = value,
     onValueChange = onValueChange,
     enabled = enabled,
-    singleLine = true,
+    singleLine = singleLine,
+    maxLines = maxLines,
     interactionSource = interactionSource,
     textStyle = TextStyle(
-      fontSize = 14.sp,
+      fontFamily = FigtreeFontFamily,
+      fontSize = 13.5.sp,
+      lineHeight = 18.sp,
       fontWeight = FontWeight.Normal,
       color = TextPrimary,
     ),
     cursorBrush = SolidColor(RoyalBlue),
     modifier = modifier
       .fillMaxWidth()
-      .height(46.dp)
-      .clip(RoundedCornerShape(10.dp))
-      .background(Color.White)
-      .border(
-        width = if (isFocused) 1.5.dp else 1.dp,
-        color = borderColor,
-        shape = RoundedCornerShape(10.dp),
-      ),
+      .heightIn(min = 44.dp),
     decorationBox = { innerTextField ->
       Row(
         modifier = Modifier
-          .fillMaxSize()
-          .padding(horizontal = 12.dp),
+          .fillMaxWidth()
+          .clip(shape)
+          .background(containerColor)
+          .border(
+            width = if (isFocused) 1.5.dp else 1.dp,
+            color = borderColor,
+            shape = shape,
+          )
+          .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Icon(
           imageVector = leadingIcon,
           contentDescription = null,
           tint = iconTint,
-          modifier = Modifier.size(17.dp),
+          modifier = Modifier.size(16.dp),
         )
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp))
         Box(
           modifier = Modifier.weight(1f),
           contentAlignment = Alignment.CenterStart,
@@ -466,11 +481,9 @@ private fun CompactStudentTextField(
           if (value.isEmpty()) {
             Text(
               text = placeholder,
-              style = TextStyle(
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Normal,
-                color = TextSecondary,
-              ),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 13.sp,
+              color = TextSecondary,
               maxLines = 1,
               overflow = TextOverflow.Ellipsis,
             )

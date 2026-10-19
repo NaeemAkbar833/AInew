@@ -2,11 +2,13 @@ package com.example.ui.exam
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -88,7 +90,7 @@ import com.example.ui.theme.TertiaryAmberContainer
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ExamDetailScreen(
   examId: String,
@@ -208,17 +210,23 @@ fun ExamDetailScreen(
             IconButton(
               onClick = { showDeleteExamDialog = true },
               modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.18f))
+                .size(48.dp)
                 .testTag("delete_exam_detail_action"),
             ) {
-              Icon(
-                imageVector = Icons.Default.DeleteOutline,
-                contentDescription = "Delete Exam",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp),
-              )
+              Box(
+                modifier = Modifier
+                  .size(36.dp)
+                  .clip(CircleShape)
+                  .background(Color.White.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+              ) {
+                Icon(
+                  imageVector = Icons.Default.DeleteOutline,
+                  contentDescription = "Delete Exam",
+                  tint = Color.White,
+                  modifier = Modifier.size(18.dp),
+                )
+              }
             }
           }
         },
@@ -248,21 +256,21 @@ fun ExamDetailScreen(
           Column(
             modifier = Modifier
               .fillMaxSize()
-              .padding(32.dp),
+              .padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
           ) {
             Text(
               text = "Exam not found",
               fontFamily = BricolageGrotesqueFontFamily,
-              fontSize = 18.sp,
+              fontSize = 17.sp,
               fontWeight = FontWeight.Bold,
               color = StatusWarning,
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             Button(
               onClick = onNavigateBack,
-              shape = RoundedCornerShape(14.dp),
+              shape = RoundedCornerShape(12.dp),
               colors = ButtonDefaults.buttonColors(
                 containerColor = RoyalBlue,
                 contentColor = Color.White,
@@ -271,6 +279,7 @@ fun ExamDetailScreen(
               Text(
                 text = "Back to Exams",
                 fontFamily = FigtreeFontFamily,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
               )
             }
@@ -287,14 +296,14 @@ fun ExamDetailScreen(
             modifier = Modifier
               .fillMaxSize()
               .verticalScroll(scrollState)
-              .padding(horizontal = 20.dp, vertical = 18.dp),
+              .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
           ) {
             // Exam Information Card
             Card(
-              shape = RoundedCornerShape(20.dp),
+              shape = RoundedCornerShape(16.dp),
               colors = CardDefaults.cardColors(containerColor = Color.White),
               border = BorderStroke(1.dp, BorderGray),
-              elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+              elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("exam_info_card"),
@@ -302,85 +311,110 @@ fun ExamDetailScreen(
               Column(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .padding(20.dp),
+                  .padding(15.dp),
               ) {
                 Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.Top,
+                  horizontalArrangement = Arrangement.spacedBy(12.dp),
                   modifier = Modifier.fillMaxWidth(),
                 ) {
-                  Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f),
+                  Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = LightBlueHighlight,
+                    modifier = Modifier.size(40.dp),
                   ) {
-                    Surface(
-                      shape = RoundedCornerShape(14.dp),
-                      color = LightBlueHighlight,
-                      modifier = Modifier.size(48.dp),
-                    ) {
-                      Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                          imageVector = Icons.Default.Description,
-                          contentDescription = null,
-                          tint = RoyalBlue,
-                          modifier = Modifier.size(24.dp),
-                        )
-                      }
+                    Box(contentAlignment = Alignment.Center) {
+                      Icon(
+                        imageVector = Icons.Default.Description,
+                        contentDescription = null,
+                        tint = RoyalBlue,
+                        modifier = Modifier.size(19.dp),
+                      )
                     }
+                  }
 
+                  Column(modifier = Modifier.weight(1f)) {
                     Text(
                       text = exam.name,
                       fontFamily = BricolageGrotesqueFontFamily,
-                      fontSize = 19.sp,
+                      fontSize = 16.5.sp,
                       fontWeight = FontWeight.Bold,
                       color = TextPrimary,
+                      maxLines = 2,
+                      overflow = TextOverflow.Ellipsis,
+                      lineHeight = 21.sp,
                     )
-                  }
-
-                  Spacer(modifier = Modifier.width(8.dp))
-
-                  Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = badgeBg,
-                  ) {
-                    Text(
-                      text = exam.type,
-                      color = badgeFg,
-                      fontFamily = FigtreeFontFamily,
-                      fontSize = 12.sp,
-                      fontWeight = FontWeight.Bold,
-                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    FlowRow(
+                      horizontalArrangement = Arrangement.spacedBy(8.dp),
+                      verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                      Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = badgeBg,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                      ) {
+                        Text(
+                          text = exam.type,
+                          color = badgeFg,
+                          fontFamily = FigtreeFontFamily,
+                          fontSize = 11.5.sp,
+                          fontWeight = FontWeight.Bold,
+                          modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                      }
+                    }
                   }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-                HorizontalDivider(color = BorderGray, thickness = 1.dp)
                 Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = BorderGray, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(10.dp))
 
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
+                FlowRow(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                  Icon(
-                    imageVector = Icons.Default.CalendarToday,
-                    contentDescription = "Exam Date",
-                    tint = RoyalBlue,
-                    modifier = Modifier.size(16.dp),
-                  )
-                  Spacer(modifier = Modifier.width(8.dp))
-                  Text(
-                    text = "Exam Date: ${exam.date}",
-                    fontFamily = FigtreeFontFamily,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextSecondary,
-                  )
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.CalendarToday,
+                      contentDescription = "Exam Date",
+                      tint = RoyalBlue,
+                      modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = "Exam Date: ${exam.date}",
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 12.5.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = TextSecondary,
+                    )
+                  }
+
+                  Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = SecondaryTealContainer,
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                  ) {
+                    Text(
+                      text = "${classUiState.classes.size} ${if (classUiState.classes.size == 1) "Class" else "Classes"}",
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 11.5.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = SecondaryTeal,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                  }
                 }
               }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             // Classes Section Header with "Add Class" Button
             Row(
@@ -391,40 +425,41 @@ fun ExamDetailScreen(
               Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f),
               ) {
                 Text(
                   text = "Classes",
                   fontFamily = BricolageGrotesqueFontFamily,
-                  fontSize = 18.sp,
+                  fontSize = 16.5.sp,
                   fontWeight = FontWeight.Bold,
                   color = TextPrimary,
                 )
                 if (classUiState.classes.isNotEmpty()) {
                   Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = LightBlueHighlight,
                   ) {
                     Text(
                       text = "${classUiState.classes.size}",
                       fontFamily = FigtreeFontFamily,
-                      fontSize = 12.sp,
+                      fontSize = 11.5.sp,
                       fontWeight = FontWeight.Bold,
                       color = DarkRoyalBlue,
-                      modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp),
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     )
                   }
                 }
               }
 
-              val btnShape = RoundedCornerShape(12.dp)
+              val btnShape = RoundedCornerShape(10.dp)
               Box(
                 modifier = Modifier
-                  .heightIn(min = 38.dp)
+                  .heightIn(min = 36.dp)
                   .shadow(elevation = 2.dp, shape = btnShape, spotColor = DarkRoyalBlue.copy(alpha = 0.25f))
                   .clip(btnShape)
                   .background(PrimaryBlueGradient)
                   .clickable(onClick = classViewModel::openAddClassDialog)
-                  .padding(horizontal = 14.dp, vertical = 8.dp)
+                  .padding(horizontal = 12.dp, vertical = 7.dp)
                   .testTag("add_class_button"),
                 contentAlignment = Alignment.Center,
               ) {
@@ -433,13 +468,13 @@ fun ExamDetailScreen(
                     imageVector = Icons.Default.Add,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(15.dp),
                   )
                   Spacer(modifier = Modifier.width(4.dp))
                   Text(
                     text = "Add Class",
                     fontFamily = FigtreeFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                   )
@@ -447,7 +482,7 @@ fun ExamDetailScreen(
               }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             when {
               classUiState.isLoading && classUiState.classes.isEmpty() -> {
@@ -467,10 +502,10 @@ fun ExamDetailScreen(
 
               classUiState.classes.isEmpty() -> {
                 Card(
-                  shape = RoundedCornerShape(20.dp),
+                  shape = RoundedCornerShape(16.dp),
                   colors = CardDefaults.cardColors(containerColor = Color.White),
                   border = BorderStroke(1.dp, BorderGray),
-                  elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                  elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
                   modifier = Modifier
                     .fillMaxWidth()
                     .testTag("classes_empty_state_card"),
@@ -478,30 +513,30 @@ fun ExamDetailScreen(
                   Column(
                     modifier = Modifier
                       .fillMaxWidth()
-                      .padding(28.dp),
+                      .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                   ) {
                     Surface(
                       shape = CircleShape,
                       color = LightBlueHighlight,
-                      modifier = Modifier.size(52.dp),
+                      modifier = Modifier.size(46.dp),
                     ) {
                       Box(contentAlignment = Alignment.Center) {
                         Icon(
                           imageVector = Icons.Default.Class,
                           contentDescription = "No classes",
                           tint = RoyalBlue,
-                          modifier = Modifier.size(24.dp),
+                          modifier = Modifier.size(22.dp),
                         )
                       }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
                       text = "No classes added yet",
                       fontFamily = BricolageGrotesqueFontFamily,
-                      fontSize = 16.sp,
+                      fontSize = 15.5.sp,
                       fontWeight = FontWeight.Bold,
                       color = TextPrimary,
                     )
@@ -511,7 +546,7 @@ fun ExamDetailScreen(
                     Text(
                       text = "Tap '+ Add Class' to add a class session to this exam.",
                       fontFamily = FigtreeFontFamily,
-                      fontSize = 13.sp,
+                      fontSize = 12.5.sp,
                       color = TextSecondary,
                       textAlign = TextAlign.Center,
                     )
@@ -521,7 +556,7 @@ fun ExamDetailScreen(
 
               else -> {
                 Column(
-                  verticalArrangement = Arrangement.spacedBy(12.dp),
+                  verticalArrangement = Arrangement.spacedBy(10.dp),
                   modifier = Modifier
                     .fillMaxWidth()
                     .testTag("classes_list"),
@@ -547,6 +582,7 @@ fun ExamDetailScreen(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ClassCard(
   classRoom: ClassRoom,
@@ -559,12 +595,12 @@ fun ClassCard(
   val timingBadgeFg = if (isMorning) StatusAmber else AccentViolet
   val timingIcon = if (isMorning) Icons.Default.WbSunny else Icons.Default.WbTwilight
 
-  val shape = RoundedCornerShape(20.dp)
+  val shape = RoundedCornerShape(16.dp)
   Card(
     shape = shape,
     colors = CardDefaults.cardColors(containerColor = Color.White),
     border = BorderStroke(1.dp, BorderGray),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     modifier = modifier
       .fillMaxWidth()
       .clip(shape)
@@ -574,181 +610,191 @@ fun ClassCard(
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(18.dp),
+        .padding(horizontal = 14.dp, vertical = 13.dp),
     ) {
       Row(
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier.fillMaxWidth(),
       ) {
         Row(
-          verticalAlignment = Alignment.CenterVertically,
+          verticalAlignment = Alignment.Top,
           horizontalArrangement = Arrangement.spacedBy(12.dp),
           modifier = Modifier.weight(1f),
         ) {
           Surface(
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(11.dp),
             color = SecondaryTealContainer,
-            modifier = Modifier.size(42.dp),
+            modifier = Modifier.size(38.dp),
           ) {
             Box(contentAlignment = Alignment.Center) {
               Icon(
                 imageVector = Icons.Default.School,
                 contentDescription = null,
                 tint = SecondaryTeal,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
               )
             }
           }
 
-          Text(
-            text = classRoom.subjectName,
-            fontFamily = BricolageGrotesqueFontFamily,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+          Column(
             modifier = Modifier.weight(1f),
-          )
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+          ) {
+            Text(
+              text = classRoom.subjectName,
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 15.5.sp,
+              fontWeight = FontWeight.Bold,
+              color = TextPrimary,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+              lineHeight = 20.sp,
+            )
+
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+              Icon(
+                imageVector = Icons.Default.CalendarMonth,
+                contentDescription = null,
+                tint = TextSecondary,
+                modifier = Modifier.size(12.dp),
+              )
+              Text(
+                text = "${classRoom.session} • ${classRoom.semester}",
+                fontFamily = FigtreeFontFamily,
+                fontSize = 12.5.sp,
+                color = TextSecondary,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 16.5.sp,
+              )
+            }
+          }
         }
+
+        Spacer(modifier = Modifier.width(8.dp))
 
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-          Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = timingBadgeBg,
-          ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-              Icon(
-                imageVector = timingIcon,
-                contentDescription = null,
-                tint = timingBadgeFg,
-                modifier = Modifier.size(12.dp),
-              )
-              Spacer(modifier = Modifier.width(4.dp))
-              Text(
-                text = classRoom.timing,
-                color = timingBadgeFg,
-                fontFamily = FigtreeFontFamily,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Bold,
-              )
-            }
-          }
-
           IconButton(
             onClick = onDeleteClick,
             modifier = Modifier
-              .size(34.dp)
-              .clip(CircleShape)
-              .background(StatusWarningContainer.copy(alpha = 0.6f))
+              .size(48.dp)
               .testTag("delete_class_button_${classRoom.subjectName}"),
           ) {
-            Icon(
-              imageVector = Icons.Default.DeleteOutline,
-              contentDescription = "Delete Class",
-              tint = StatusWarning,
-              modifier = Modifier.size(18.dp),
-            )
+            Box(
+              modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFF8FAFC))
+                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(8.dp)),
+              contentAlignment = Alignment.Center,
+            ) {
+              Icon(
+                imageVector = Icons.Default.DeleteOutline,
+                contentDescription = "Delete Class",
+                tint = Color(0xFF94A3B8),
+                modifier = Modifier.size(16.dp),
+              )
+            }
           }
 
           Icon(
             imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
             contentDescription = "Open Class",
             tint = TextSecondary,
-            modifier = Modifier.size(13.dp),
+            modifier = Modifier.size(12.dp),
           )
         }
       }
 
-      Spacer(modifier = Modifier.height(12.dp))
+      Spacer(modifier = Modifier.height(10.dp))
 
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+      FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth(),
       ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = Icons.Default.CalendarMonth,
-            contentDescription = null,
-            tint = TextSecondary,
-            modifier = Modifier.size(14.dp),
-          )
-          Spacer(modifier = Modifier.width(4.dp))
-          Text(
-            text = classRoom.session,
-            fontFamily = FigtreeFontFamily,
-            fontSize = 12.5.sp,
-            color = TextSecondary,
-            fontWeight = FontWeight.Medium,
-          )
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = Icons.Default.School,
-            contentDescription = null,
-            tint = TextSecondary,
-            modifier = Modifier.size(14.dp),
-          )
-          Spacer(modifier = Modifier.width(4.dp))
-          Text(
-            text = classRoom.semester,
-            fontFamily = FigtreeFontFamily,
-            fontSize = 12.5.sp,
-            color = TextSecondary,
-            fontWeight = FontWeight.Medium,
-          )
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(
-            imageVector = Icons.Default.Grade,
-            contentDescription = null,
-            tint = RoyalBlue,
-            modifier = Modifier.size(14.dp),
-          )
-          Spacer(modifier = Modifier.width(4.dp))
-          Text(
-            text = "${classRoom.totalMarks} Marks",
-            fontFamily = FigtreeFontFamily,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary,
-          )
-        }
-      }
-
-      if (!classRoom.questionPaperPath.isNullOrBlank()) {
-        Spacer(modifier = Modifier.height(10.dp))
         Surface(
-          shape = RoundedCornerShape(8.dp),
+          shape = RoundedCornerShape(6.dp),
+          color = timingBadgeBg,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+          ) {
+            Icon(
+              imageVector = timingIcon,
+              contentDescription = null,
+              tint = timingBadgeFg,
+              modifier = Modifier.size(11.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = classRoom.timing,
+              color = timingBadgeFg,
+              fontFamily = FigtreeFontFamily,
+              fontSize = 11.5.sp,
+              fontWeight = FontWeight.Bold,
+            )
+          }
+        }
+
+        Surface(
+          shape = RoundedCornerShape(6.dp),
           color = LightBlueHighlight,
         ) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
           ) {
             Icon(
-              imageVector = Icons.Default.AttachFile,
+              imageVector = Icons.Default.Grade,
               contentDescription = null,
-              tint = DarkRoyalBlue,
+              tint = RoyalBlue,
               modifier = Modifier.size(12.dp),
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
-              text = "Question Paper Attached",
+              text = "${classRoom.totalMarks} Marks",
               fontFamily = FigtreeFontFamily,
               fontSize = 11.5.sp,
-              color = DarkRoyalBlue,
               fontWeight = FontWeight.Bold,
+              color = DarkRoyalBlue,
             )
+          }
+        }
+
+        if (!classRoom.questionPaperPath.isNullOrBlank()) {
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = LightBlueHighlight,
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+              Icon(
+                imageVector = Icons.Default.AttachFile,
+                contentDescription = null,
+                tint = DarkRoyalBlue,
+                modifier = Modifier.size(12.dp),
+              )
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(
+                text = "Question Paper Attached",
+                fontFamily = FigtreeFontFamily,
+                fontSize = 11.5.sp,
+                color = DarkRoyalBlue,
+                fontWeight = FontWeight.Bold,
+              )
+            }
           }
         }
       }

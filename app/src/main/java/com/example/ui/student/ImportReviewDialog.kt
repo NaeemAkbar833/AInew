@@ -29,7 +29,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SupervisorAccount
@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,8 +68,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ExtractedStudent
 import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
 import com.example.ui.theme.DarkRoyalBlue
 import com.example.ui.theme.DisabledBackground
+import com.example.ui.theme.FigtreeFontFamily
 import com.example.ui.theme.LightBlueHighlight
 import com.example.ui.theme.RoyalBlue
 import com.example.ui.theme.StatusWarning
@@ -104,7 +107,7 @@ fun ImportReviewDialog(
   ModalBottomSheet(
     onDismissRequest = { if (!isSaving) onDismissRequest() },
     sheetState = sheetState,
-    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
     containerColor = Color.White,
     tonalElevation = 2.dp,
     scrimColor = Color.Black.copy(alpha = 0.4f),
@@ -137,7 +140,7 @@ fun ImportReviewDialog(
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 20.dp)
+          .padding(horizontal = 16.dp)
           .padding(bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -145,12 +148,14 @@ fun ImportReviewDialog(
         Row(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(10.dp),
-          modifier = Modifier.weight(1f),
+          modifier = Modifier
+            .weight(1f)
+            .padding(end = 8.dp),
         ) {
           Surface(
             shape = RoundedCornerShape(10.dp),
             color = LightBlueHighlight,
-            modifier = Modifier.size(38.dp),
+            modifier = Modifier.size(36.dp),
           ) {
             Box(contentAlignment = Alignment.Center) {
               Icon(
@@ -164,15 +169,15 @@ fun ImportReviewDialog(
           Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(
               text = "Review Student List",
-              style = MaterialTheme.typography.titleMedium.copy(
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-              ),
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 16.sp,
+              fontWeight = FontWeight.Bold,
               color = TextPrimary,
             )
             Text(
               text = "Verify and edit extracted information before saving",
-              style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 12.sp,
               color = TextSecondary,
             )
           }
@@ -188,17 +193,22 @@ fun ImportReviewDialog(
             }
           },
           enabled = !isSaving,
-          modifier = Modifier
-            .size(32.dp)
-            .clip(CircleShape)
-            .background(DisabledBackground),
+          modifier = Modifier.size(48.dp),
         ) {
-          Icon(
-            imageVector = Icons.Default.Close,
-            contentDescription = "Close",
-            tint = TextSecondary,
-            modifier = Modifier.size(16.dp),
-          )
+          Box(
+            modifier = Modifier
+              .size(32.dp)
+              .clip(CircleShape)
+              .background(DisabledBackground),
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(
+              imageVector = Icons.Default.Close,
+              contentDescription = "Close",
+              tint = TextSecondary,
+              modifier = Modifier.size(16.dp),
+            )
+          }
         }
       }
 
@@ -212,7 +222,7 @@ fun ImportReviewDialog(
           onClick = onDismissError,
           modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         ) {
           Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -227,11 +237,10 @@ fun ImportReviewDialog(
             )
             Text(
               text = errorMessage,
-              style = MaterialTheme.typography.bodySmall.copy(
-                fontSize = 12.sp,
-                lineHeight = 16.sp,
-                fontWeight = FontWeight.Medium,
-              ),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 12.sp,
+              lineHeight = 16.sp,
+              fontWeight = FontWeight.Medium,
               color = StatusWarning,
               modifier = Modifier.weight(1f),
             )
@@ -249,45 +258,45 @@ fun ImportReviewDialog(
           Column(
             modifier = Modifier
               .fillMaxWidth()
-              .padding(horizontal = 24.dp, vertical = 40.dp),
+              .padding(horizontal = 24.dp, vertical = 32.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
           ) {
             Surface(
               shape = RoundedCornerShape(12.dp),
               color = LightBlueHighlight,
-              modifier = Modifier.size(48.dp),
+              modifier = Modifier.size(42.dp),
             ) {
               Box(contentAlignment = Alignment.Center) {
                 Icon(
-                  imageVector = Icons.Default.Delete,
+                  imageVector = Icons.Default.SupervisorAccount,
                   contentDescription = null,
-                  modifier = Modifier.size(22.dp),
+                  modifier = Modifier.size(20.dp),
                   tint = RoyalBlue,
                 )
               }
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
               text = "No students in list",
-              style = MaterialTheme.typography.titleSmall.copy(
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-              ),
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 15.sp,
+              fontWeight = FontWeight.Bold,
               color = TextPrimary,
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
               text = "Try scanning again or add students manually.",
-              style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+              fontFamily = FigtreeFontFamily,
+              fontSize = 12.sp,
               color = TextSecondary,
             )
           }
         } else {
           LazyColumn(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
           ) {
             itemsIndexed(extractedStudents) { index, student ->
               ExtractedStudentItem(
@@ -307,7 +316,7 @@ fun ImportReviewDialog(
         modifier = Modifier
           .fillMaxWidth()
           .background(Color.White)
-          .padding(horizontal = 20.dp, vertical = 12.dp),
+          .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
@@ -326,13 +335,13 @@ fun ImportReviewDialog(
           border = BorderStroke(1.dp, BorderGray),
           modifier = Modifier
             .weight(1f)
-            .height(45.dp),
+            .height(44.dp),
         ) {
           Box(contentAlignment = Alignment.Center) {
             Text(
               text = "Cancel",
               style = MaterialTheme.typography.labelLarge.copy(
-                fontSize = 14.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.SemiBold,
               ),
               color = TextPrimary,
@@ -354,7 +363,7 @@ fun ImportReviewDialog(
           contentPadding = PaddingValues(),
           modifier = Modifier
             .weight(1.4f)
-            .height(45.dp),
+            .height(44.dp),
         ) {
           Box(
             modifier = Modifier
@@ -375,7 +384,7 @@ fun ImportReviewDialog(
               Text(
                 text = "Add ${extractedStudents.size} Students",
                 style = MaterialTheme.typography.labelLarge.copy(
-                  fontSize = 14.sp,
+                  fontSize = 13.5.sp,
                   fontWeight = FontWeight.SemiBold,
                 ),
                 color = if (canConfirm) Color.White else TextSecondary,
@@ -408,97 +417,152 @@ fun ExtractedStudentItem(
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(14.dp),
-      verticalArrangement = Arrangement.spacedBy(10.dp),
+        .padding(12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        if (student.isUnclear) {
-          Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-          ) {
-            Icon(
-              imageVector = Icons.Default.ErrorOutline,
-              contentDescription = null,
-              tint = StatusWarning,
-              modifier = Modifier.size(15.dp),
-            )
-            Text(
-              text = student.reviewReason ?: "Incomplete data detected",
-              style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-              ),
-              color = StatusWarning,
-            )
-          }
-        } else {
-          Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = LightBlueHighlight,
-          ) {
-            Text(
-              text = "Extracted Student",
-              style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.SemiBold,
-              ),
-              color = RoyalBlue,
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            )
-          }
-        }
-
-        Surface(
-          shape = CircleShape,
-          color = StatusWarningContainer,
-          modifier = Modifier
-            .size(28.dp)
-            .clip(CircleShape)
-            .clickable(onClick = onDelete),
+      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.Top,
         ) {
-          Box(contentAlignment = Alignment.Center) {
-            Icon(
-              imageVector = Icons.Default.Delete,
-              contentDescription = "Delete student",
-              tint = StatusWarning,
-              modifier = Modifier.size(15.dp),
+          Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+              if (student.rollNumber.isNotBlank()) {
+                Surface(
+                  shape = RoundedCornerShape(6.dp),
+                  color = LightBlueHighlight,
+                ) {
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Badge,
+                      contentDescription = null,
+                      tint = DarkRoyalBlue,
+                      modifier = Modifier.size(11.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                      text = student.rollNumber,
+                      style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                      ),
+                      color = DarkRoyalBlue,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                  }
+                }
+              }
+
+              if (student.isUnclear) {
+                Row(
+                  modifier = Modifier.weight(1f, fill = false),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = StatusWarning,
+                    modifier = Modifier.size(14.dp),
+                  )
+                  Text(
+                    text = student.reviewReason ?: "Incomplete data detected",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontSize = 11.5.sp,
+                      fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = StatusWarning,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                }
+              } else if (student.rollNumber.isBlank()) {
+                Surface(
+                  shape = RoundedCornerShape(6.dp),
+                  color = LightBlueHighlight,
+                ) {
+                  Text(
+                    text = "Extracted Student",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = RoyalBlue,
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                  )
+                }
+              }
+            }
+
+            Text(
+              text = "Student Name",
+              style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Medium,
+              ),
+              color = TextSecondary,
             )
           }
-        }
-      }
 
-      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-          text = "Student Name",
-          style = MaterialTheme.typography.labelMedium.copy(
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-          ),
-          color = TextPrimary,
-        )
+          Spacer(modifier = Modifier.width(8.dp))
+
+          Box(
+            modifier = Modifier
+              .size(48.dp)
+              .clickable(
+                role = Role.Button,
+                onClick = onDelete,
+              ),
+            contentAlignment = Alignment.TopEnd,
+          ) {
+            Box(
+              modifier = Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFF8FAFC))
+                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(8.dp)),
+              contentAlignment = Alignment.Center,
+            ) {
+              Icon(
+                imageVector = Icons.Default.DeleteOutline,
+                contentDescription = "Delete student",
+                tint = Color(0xFF94A3B8),
+                modifier = Modifier.size(15.dp),
+              )
+            }
+          }
+        }
         CompactReviewTextField(
           value = student.name,
           onValueChange = { onUpdate(student.copy(name = it)) },
           placeholder = "Student Name",
           leadingIcon = Icons.Default.Person,
           isError = student.name.isBlank(),
+          singleLine = false,
+          maxLines = 2,
         )
       }
 
-      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(
           text = "Father's Name",
           style = MaterialTheme.typography.labelMedium.copy(
-            fontSize = 12.sp,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.Medium,
           ),
-          color = TextPrimary,
+          color = TextSecondary,
         )
         CompactReviewTextField(
           value = student.fatherName,
@@ -506,17 +570,19 @@ fun ExtractedStudentItem(
           placeholder = "Father Name",
           leadingIcon = Icons.Default.SupervisorAccount,
           isError = student.fatherName.isBlank(),
+          singleLine = false,
+          maxLines = 2,
         )
       }
 
-      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(
           text = "Roll Number",
           style = MaterialTheme.typography.labelMedium.copy(
-            fontSize = 12.sp,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.Medium,
           ),
-          color = TextPrimary,
+          color = TextSecondary,
         )
         CompactReviewTextField(
           value = student.rollNumber,
@@ -524,6 +590,8 @@ fun ExtractedStudentItem(
           placeholder = "Roll Number",
           leadingIcon = Icons.Default.Badge,
           isError = student.rollNumber.isBlank(),
+          singleLine = true,
+          maxLines = 1,
         )
       }
     }
@@ -537,6 +605,8 @@ private fun CompactReviewTextField(
   placeholder: String,
   leadingIcon: ImageVector,
   isError: Boolean,
+  singleLine: Boolean = false,
+  maxLines: Int = 2,
   modifier: Modifier = Modifier,
 ) {
   val interactionSource = remember { MutableInteractionSource() }
@@ -558,34 +628,36 @@ private fun CompactReviewTextField(
   BasicTextField(
     value = value,
     onValueChange = onValueChange,
-    singleLine = true,
+    singleLine = singleLine,
+    maxLines = maxLines,
     interactionSource = interactionSource,
     cursorBrush = SolidColor(RoyalBlue),
     textStyle = TextStyle(
       fontSize = 14.sp,
-      fontWeight = FontWeight.Normal,
+      lineHeight = 18.sp,
+      fontWeight = FontWeight.Medium,
       color = TextPrimary,
     ),
     modifier = modifier
       .fillMaxWidth()
-      .height(44.dp),
+      .heightIn(min = 40.dp),
     decorationBox = { innerTextField ->
       Row(
         modifier = Modifier
-          .fillMaxSize()
+          .fillMaxWidth()
           .clip(shape)
           .background(Color.White)
           .border(borderWidth, borderColor, shape)
-          .padding(horizontal = 12.dp),
+          .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Icon(
           imageVector = leadingIcon,
           contentDescription = null,
           tint = iconTint,
-          modifier = Modifier.size(16.dp),
+          modifier = Modifier.size(15.dp),
         )
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp))
         Box(
           modifier = Modifier.weight(1f),
           contentAlignment = Alignment.CenterStart,

@@ -51,6 +51,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -100,21 +101,21 @@ fun SignUpScreen(
         .fillMaxWidth()
         .verticalScroll(scrollState)
         .widthIn(max = 440.dp)
-        .padding(bottom = 32.dp),
+        .padding(bottom = 24.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-      // 1. Stitch Curved Royal-Blue Gradient Header (#1F3FBF -> #2A4FD6)
+      // 1. Compact Curved Royal-Blue Gradient Header
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
+          .clip(RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp))
           .background(HeaderBlueGradient)
           .statusBarsPadding()
-          .padding(horizontal = 24.dp, vertical = 22.dp),
+          .padding(horizontal = 20.dp, vertical = 16.dp),
       ) {
         Column(
           modifier = Modifier.fillMaxWidth(),
-          verticalArrangement = Arrangement.spacedBy(18.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -123,20 +124,20 @@ fun SignUpScreen(
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(12.dp),
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
               Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(11.dp),
                 color = Color.White.copy(alpha = 0.2f),
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
-                modifier = Modifier.size(44.dp),
+                modifier = Modifier.size(38.dp),
               ) {
                 Box(contentAlignment = Alignment.Center) {
                   Icon(
                     imageVector = Icons.Default.Description,
                     contentDescription = "GradeScan Logo",
                     tint = Color.White,
-                    modifier = Modifier.size(24.dp),
+                    modifier = Modifier.size(20.dp),
                   )
                 }
               }
@@ -144,16 +145,16 @@ fun SignUpScreen(
                 Text(
                   text = "GradeScan",
                   fontFamily = BricolageGrotesqueFontFamily,
-                  fontSize = 24.sp,
+                  fontSize = 20.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color.White,
-                  letterSpacing = (-0.5).sp,
+                  letterSpacing = (-0.4).sp,
                 )
                 Text(
                   text = "Smart Paper Evaluation",
                   fontFamily = FigtreeFontFamily,
-                  fontSize = 12.sp,
-                  color = Color.White.copy(alpha = 0.82f),
+                  fontSize = 11.5.sp,
+                  color = Color.White.copy(alpha = 0.84f),
                 )
               }
             }
@@ -161,7 +162,7 @@ fun SignUpScreen(
             IconButton(
               onClick = onNavigateBack,
               modifier = Modifier
-                .size(40.dp)
+                .size(36.dp)
                 .clip(CircleShape)
                 .background(Color.White.copy(alpha = 0.18f))
                 .testTag("signup_back_button"),
@@ -170,57 +171,58 @@ fun SignUpScreen(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Back",
                 tint = Color.White,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
               )
             }
           }
 
           Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = Color.White.copy(alpha = 0.18f),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+            shape = RoundedCornerShape(8.dp),
+            color = Color.White.copy(alpha = 0.16f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.24f)),
           ) {
             Text(
               text = "Teacher Account Registration",
               fontFamily = FigtreeFontFamily,
-              fontSize = 12.sp,
+              fontSize = 11.sp,
               color = Color.White,
               fontWeight = FontWeight.Bold,
-              modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
             )
           }
         }
       }
 
-      Spacer(modifier = Modifier.height(24.dp))
+      Spacer(modifier = Modifier.height(16.dp))
 
       // 2. Main Body Section
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 20.dp),
+          .padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.Start,
       ) {
         Text(
           text = "Create account",
           fontFamily = BricolageGrotesqueFontFamily,
-          fontSize = 26.sp,
+          fontSize = 20.sp,
+          lineHeight = 24.sp,
           fontWeight = FontWeight.Bold,
           color = TextPrimary,
-          letterSpacing = (-0.3).sp,
+          letterSpacing = (-0.2).sp,
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         Text(
           text = "Set up your teacher account to start creating exams and scanning student papers.",
           fontFamily = FigtreeFontFamily,
-          fontSize = 14.sp,
+          fontSize = 13.sp,
           color = TextSecondary,
-          lineHeight = 20.sp,
+          lineHeight = 18.sp,
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Inline Error Card
         if (uiState.errorMessage != null) {
@@ -230,28 +232,29 @@ fun SignUpScreen(
               contentColor = StatusWarning,
             ),
             border = BorderStroke(1.dp, StatusWarning.copy(alpha = 0.35f)),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             modifier = Modifier
               .fillMaxWidth()
-              .padding(bottom = 16.dp)
+              .padding(bottom = 14.dp)
               .testTag("signup_error_card"),
           ) {
             Row(
-              modifier = Modifier.padding(14.dp),
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
               verticalAlignment = Alignment.CenterVertically,
             ) {
               Icon(
                 imageVector = Icons.Default.ErrorOutline,
                 contentDescription = "Error",
                 tint = StatusWarning,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
               )
-              Spacer(modifier = Modifier.width(10.dp))
+              Spacer(modifier = Modifier.width(8.dp))
               Text(
                 text = uiState.errorMessage ?: "",
                 fontFamily = FigtreeFontFamily,
-                fontSize = 13.sp,
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = StatusWarning,
               )
@@ -259,9 +262,9 @@ fun SignUpScreen(
           }
         }
 
-        // Form Card Container (#FFFFFF surface, #D1D9EC border, 20.dp radius)
+        // Form Card Container
         Card(
-          shape = RoundedCornerShape(20.dp),
+          shape = RoundedCornerShape(16.dp),
           colors = CardDefaults.cardColors(
             containerColor = Color.White,
           ),
@@ -275,24 +278,30 @@ fun SignUpScreen(
           Column(
             modifier = Modifier
               .fillMaxWidth()
-              .padding(20.dp),
+              .padding(16.dp),
           ) {
             Text(
               text = "Email address",
               fontFamily = FigtreeFontFamily,
-              fontSize = 13.sp,
+              fontSize = 12.5.sp,
               fontWeight = FontWeight.SemiBold,
               color = TextPrimary,
-              modifier = Modifier.padding(bottom = 6.dp),
+              modifier = Modifier.padding(bottom = 5.dp),
             )
 
             OutlinedTextField(
               value = uiState.email,
               onValueChange = viewModel::onEmailChanged,
+              textStyle = TextStyle(
+                fontFamily = FigtreeFontFamily,
+                fontSize = 13.5.sp,
+                color = TextPrimary,
+              ),
               placeholder = {
                 Text(
                   text = "teacher@school.edu",
                   fontFamily = FigtreeFontFamily,
+                  fontSize = 13.sp,
                   color = TextSecondary,
                 )
               },
@@ -301,7 +310,7 @@ fun SignUpScreen(
                   imageVector = Icons.Default.Email,
                   contentDescription = "Email Icon",
                   tint = RoyalBlue,
-                  modifier = Modifier.size(20.dp),
+                  modifier = Modifier.size(18.dp),
                 )
               },
               singleLine = true,
@@ -312,7 +321,7 @@ fun SignUpScreen(
               keyboardActions = KeyboardActions(
                 onNext = { focusManager.moveFocus(FocusDirection.Down) }
               ),
-              shape = RoundedCornerShape(14.dp),
+              shape = RoundedCornerShape(12.dp),
               colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = RoyalBlue,
                 unfocusedBorderColor = BorderGray,
@@ -329,24 +338,30 @@ fun SignUpScreen(
                 .testTag("signup_email_input"),
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Text(
               text = "Password (min 6 characters)",
               fontFamily = FigtreeFontFamily,
-              fontSize = 13.sp,
+              fontSize = 12.5.sp,
               fontWeight = FontWeight.SemiBold,
               color = TextPrimary,
-              modifier = Modifier.padding(bottom = 6.dp),
+              modifier = Modifier.padding(bottom = 5.dp),
             )
 
             OutlinedTextField(
               value = uiState.password,
               onValueChange = viewModel::onPasswordChanged,
+              textStyle = TextStyle(
+                fontFamily = FigtreeFontFamily,
+                fontSize = 13.5.sp,
+                color = TextPrimary,
+              ),
               placeholder = {
                 Text(
                   text = "Create password",
                   fontFamily = FigtreeFontFamily,
+                  fontSize = 13.sp,
                   color = TextSecondary,
                 )
               },
@@ -355,7 +370,7 @@ fun SignUpScreen(
                   imageVector = Icons.Default.Lock,
                   contentDescription = "Password Icon",
                   tint = RoyalBlue,
-                  modifier = Modifier.size(20.dp),
+                  modifier = Modifier.size(18.dp),
                 )
               },
               trailingIcon = {
@@ -367,7 +382,7 @@ fun SignUpScreen(
                     imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                     contentDescription = if (passwordVisible) "Hide password" else "Show password",
                     tint = TextSecondary,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(18.dp),
                   )
                 }
               },
@@ -380,7 +395,7 @@ fun SignUpScreen(
               keyboardActions = KeyboardActions(
                 onNext = { focusManager.moveFocus(FocusDirection.Down) }
               ),
-              shape = RoundedCornerShape(14.dp),
+              shape = RoundedCornerShape(12.dp),
               colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = RoyalBlue,
                 unfocusedBorderColor = BorderGray,
@@ -397,24 +412,30 @@ fun SignUpScreen(
                 .testTag("signup_password_input"),
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Text(
               text = "Confirm password",
               fontFamily = FigtreeFontFamily,
-              fontSize = 13.sp,
+              fontSize = 12.5.sp,
               fontWeight = FontWeight.SemiBold,
               color = TextPrimary,
-              modifier = Modifier.padding(bottom = 6.dp),
+              modifier = Modifier.padding(bottom = 5.dp),
             )
 
             OutlinedTextField(
               value = uiState.confirmPassword,
               onValueChange = viewModel::onConfirmPasswordChanged,
+              textStyle = TextStyle(
+                fontFamily = FigtreeFontFamily,
+                fontSize = 13.5.sp,
+                color = TextPrimary,
+              ),
               placeholder = {
                 Text(
                   text = "Re-enter password",
                   fontFamily = FigtreeFontFamily,
+                  fontSize = 13.sp,
                   color = TextSecondary,
                 )
               },
@@ -423,7 +444,7 @@ fun SignUpScreen(
                   imageVector = Icons.Default.Lock,
                   contentDescription = "Confirm Password Icon",
                   tint = RoyalBlue,
-                  modifier = Modifier.size(20.dp),
+                  modifier = Modifier.size(18.dp),
                 )
               },
               trailingIcon = {
@@ -435,7 +456,7 @@ fun SignUpScreen(
                     imageVector = if (confirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                     contentDescription = if (confirmPasswordVisible) "Hide password" else "Show password",
                     tint = TextSecondary,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(18.dp),
                   )
                 }
               },
@@ -451,7 +472,7 @@ fun SignUpScreen(
                   viewModel.signUp(onSignUpSuccess)
                 }
               ),
-              shape = RoundedCornerShape(14.dp),
+              shape = RoundedCornerShape(12.dp),
               colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = RoyalBlue,
                 unfocusedBorderColor = BorderGray,
@@ -468,7 +489,7 @@ fun SignUpScreen(
                 .testTag("signup_confirm_password_input"),
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             // Primary Gradient Create Account Button (#1F3FBF -> #4262E6)
             GradeScanPrimaryButton(
@@ -479,17 +500,17 @@ fun SignUpScreen(
               },
               enabled = !uiState.isLoading,
               isLoading = uiState.isLoading,
-              cornerRadius = 14.dp,
+              cornerRadius = 12.dp,
               testTag = "signup_submit_button",
             )
           }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Return to Sign In Footer
         Surface(
-          shape = RoundedCornerShape(16.dp),
+          shape = RoundedCornerShape(12.dp),
           color = LightBlueHighlight,
           border = BorderStroke(1.dp, BorderGray),
           modifier = Modifier.fillMaxWidth(),
@@ -497,17 +518,17 @@ fun SignUpScreen(
           Row(
             modifier = Modifier
               .fillMaxWidth()
-              .padding(horizontal = 16.dp, vertical = 6.dp),
+              .padding(horizontal = 14.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
           ) {
             Text(
               text = "Already have an account?",
               fontFamily = FigtreeFontFamily,
-              fontSize = 14.sp,
+              fontSize = 13.sp,
               color = TextSecondary,
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(2.dp))
             TextButton(
               onClick = onNavigateBack,
               modifier = Modifier.testTag("navigate_to_login_button"),
@@ -515,7 +536,7 @@ fun SignUpScreen(
               Text(
                 text = "Sign In",
                 fontFamily = FigtreeFontFamily,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = DarkRoyalBlue,
               )

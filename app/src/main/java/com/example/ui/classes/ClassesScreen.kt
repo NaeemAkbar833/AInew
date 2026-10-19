@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -49,6 +51,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Exam
 import com.example.ui.components.GradeScanStitchHeader
 import com.example.ui.exam.ExamViewModel
+import com.example.ui.theme.AccentViolet
+import com.example.ui.theme.AccentVioletContainer
 import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.BorderGray
 import com.example.ui.theme.BricolageGrotesqueFontFamily
@@ -58,6 +62,8 @@ import com.example.ui.theme.LightBlueHighlight
 import com.example.ui.theme.RoyalBlue
 import com.example.ui.theme.SecondaryTeal
 import com.example.ui.theme.SecondaryTealContainer
+import com.example.ui.theme.StatusAmber
+import com.example.ui.theme.TertiaryAmberContainer
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
@@ -167,8 +173,8 @@ fun ClassesScreen(
         }
       } else {
         LazyColumn(
-          contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 96.dp),
-          verticalArrangement = Arrangement.spacedBy(14.dp),
+          contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
           modifier = Modifier
             .fillMaxSize()
             .testTag("classes_exams_list"),
@@ -177,10 +183,10 @@ fun ClassesScreen(
             Text(
               text = "Select an exam to view and manage its classes:",
               fontFamily = FigtreeFontFamily,
-              fontSize = 13.5.sp,
+              fontSize = 13.sp,
               color = TextSecondary,
               fontWeight = FontWeight.SemiBold,
-              modifier = Modifier.padding(bottom = 4.dp, start = 2.dp),
+              modifier = Modifier.padding(bottom = 2.dp, start = 2.dp),
             )
           }
           items(
@@ -198,17 +204,25 @@ fun ClassesScreen(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ClassExamItemCard(
   exam: Exam,
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
+  val (badgeBg, badgeFg) = when (exam.type.lowercase()) {
+    "mid term" -> Pair(LightBlueHighlight, DarkRoyalBlue)
+    "final" -> Pair(AccentVioletContainer, AccentViolet)
+    "supply" -> Pair(TertiaryAmberContainer, StatusAmber)
+    else -> Pair(SecondaryTealContainer, SecondaryTeal)
+  }
+
   Card(
-    shape = RoundedCornerShape(20.dp),
+    shape = RoundedCornerShape(16.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
     border = BorderStroke(1.dp, BorderGray),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     modifier = modifier
       .fillMaxWidth()
       .testTag("classes_exam_card_${exam.id}"),
@@ -217,76 +231,89 @@ private fun ClassExamItemCard(
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(18.dp),
+        .padding(horizontal = 14.dp, vertical = 14.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         color = SecondaryTealContainer,
-        modifier = Modifier.size(48.dp),
+        modifier = Modifier.size(42.dp),
       ) {
         Box(contentAlignment = Alignment.Center) {
           Icon(
             imageVector = Icons.Outlined.School,
             contentDescription = "Classes for Exam",
             tint = SecondaryTeal,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(20.dp),
           )
         }
       }
 
-      Spacer(modifier = Modifier.width(14.dp))
+      Spacer(modifier = Modifier.width(13.dp))
 
       Column(modifier = Modifier.weight(1f)) {
         Text(
           text = exam.name,
           fontFamily = BricolageGrotesqueFontFamily,
-          fontSize = 17.sp,
+          fontSize = 16.sp,
+          lineHeight = 21.sp,
           fontWeight = FontWeight.Bold,
           color = TextPrimary,
-          maxLines = 1,
+          maxLines = 2,
           overflow = TextOverflow.Ellipsis,
         )
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Spacer(modifier = Modifier.height(7.dp))
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
           Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = LightBlueHighlight,
+            shape = RoundedCornerShape(7.dp),
+            color = badgeBg,
+            modifier = Modifier.align(Alignment.CenterVertically),
           ) {
             Text(
               text = exam.type,
               fontFamily = FigtreeFontFamily,
-              color = DarkRoyalBlue,
+              color = badgeFg,
               fontWeight = FontWeight.Bold,
               fontSize = 11.5.sp,
-              modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             )
           }
           if (exam.date.isNotBlank()) {
-            Spacer(modifier = Modifier.width(10.dp))
-            Icon(
-              imageVector = Icons.Outlined.CalendarToday,
-              contentDescription = "Date",
-              tint = TextSecondary,
-              modifier = Modifier.size(13.dp),
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-              text = exam.date,
-              fontFamily = FigtreeFontFamily,
-              fontSize = 13.sp,
-              color = TextSecondary,
-              fontWeight = FontWeight.Medium,
-            )
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp),
+              modifier = Modifier.align(Alignment.CenterVertically),
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.CalendarToday,
+                contentDescription = "Date",
+                tint = TextSecondary,
+                modifier = Modifier.size(12.dp),
+              )
+              Text(
+                text = exam.date,
+                fontFamily = FigtreeFontFamily,
+                fontSize = 12.sp,
+                color = TextSecondary,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
           }
         }
       }
+
+      Spacer(modifier = Modifier.width(10.dp))
 
       Icon(
         imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
         contentDescription = "Open Classes",
         tint = TextSecondary,
-        modifier = Modifier.size(14.dp),
+        modifier = Modifier.size(12.dp),
       )
     }
   }
