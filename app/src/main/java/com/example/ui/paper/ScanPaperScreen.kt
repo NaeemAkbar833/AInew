@@ -1,14 +1,15 @@
 package com.example.ui.paper
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,54 +17,58 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -71,15 +76,32 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.model.LocalScannedPage
+import com.example.ui.components.GradeScanPrimaryButton
+import com.example.ui.components.GradeScanProgressDialog
 import com.example.ui.paper.components.SourcePickerBottomSheet
+import com.example.ui.theme.BorderGray
+import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.StatusSuccess
+import com.example.ui.theme.StatusSuccessContainer
+import com.example.ui.theme.StatusWarning
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
 import java.io.File
+import kotlinx.coroutines.launch
 
+/**
+ * Screen for capturing or picking multiple pages of a student's answer sheet,
+ * previewing them in sequence, removing individual pages, and uploading
+ * them to Supabase Storage (`student-papers` bucket) + creating database records.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanPaperScreen(
@@ -90,453 +112,683 @@ fun ScanPaperScreen(
   onScanFinished: (String) -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val context = LocalContext.current
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+  val context = LocalContext.current
   val snackbarHostState = remember { SnackbarHostState() }
+  val coroutineScope = rememberCoroutineScope()
 
   var showSourcePicker by remember { mutableStateOf(false) }
-  var showDiscardDialog by remember { mutableStateOf(false) }
-  var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
+  var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+  // Show upload errors in snackbar
+  LaunchedEffect(uiState.uploadError) {
+    uiState.uploadError?.let { errorMsg ->
+      snackbarHostState.showSnackbar(errorMsg)
+      viewModel.clearError()
+    }
+  }
 
   // Camera capture launcher
   val takePictureLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.TakePicture()
   ) { success ->
-    if (success) {
-      tempCameraUri?.let { uri ->
-        viewModel.addPage(uri)
-      }
+    val uri = pendingCameraUri
+    if (success && uri != null) {
+      viewModel.addPage(uri)
     }
-    tempCameraUri = null
   }
 
-  // Camera permission launcher
+  // Helper to launch camera with a fresh temp file
+  val launchCameraCapture = {
+    try {
+      val (_, uri) = createTempImageFileAndUri(context)
+      pendingCameraUri = uri
+      takePictureLauncher.launch(uri)
+    } catch (e: Exception) {
+      coroutineScope.launch {
+        snackbarHostState.showSnackbar("Unable to start camera: ${e.localizedMessage}")
+      }
+    }
+  }
+
+  // Runtime Camera permission launcher
   val cameraPermissionLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.RequestPermission()
   ) { isGranted ->
     if (isGranted) {
-      try {
-        val tempFile = File.createTempFile("scan_page_", ".jpg", context.cacheDir)
-        val uri = FileProvider.getUriForFile(
-          context,
-          "${context.packageName}.fileprovider",
-          tempFile,
-        )
-        tempCameraUri = uri
-        takePictureLauncher.launch(uri)
-      } catch (e: Exception) {
-        Toast.makeText(context, "Could not open camera: ${e.message}", Toast.LENGTH_SHORT).show()
-      }
+      launchCameraCapture()
     } else {
-      Toast.makeText(context, "Camera permission is required to capture pages.", Toast.LENGTH_LONG).show()
+      coroutineScope.launch {
+        snackbarHostState.showSnackbar("Camera permission is required to capture answer sheets.")
+      }
     }
   }
 
-  // Photo gallery picker launcher (multiple pages supported)
-  val galleryLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.PickMultipleVisualMedia()
-  ) { uris ->
+  // Gallery Picker for adding one or multiple pages at once
+  val addMultipleGalleryLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 20)
+  ) { uris: List<Uri> ->
     if (uris.isNotEmpty()) {
       viewModel.addPages(uris)
     }
   }
 
-  fun launchCamera() {
-    val permissionStatus = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
-    if (permissionStatus == PackageManager.PERMISSION_GRANTED) {
-      try {
-        val tempFile = File.createTempFile("scan_page_", ".jpg", context.cacheDir)
-        val uri = FileProvider.getUriForFile(
-          context,
-          "${context.packageName}.fileprovider",
-          tempFile,
-        )
-        tempCameraUri = uri
-        takePictureLauncher.launch(uri)
-      } catch (e: Exception) {
-        Toast.makeText(context, "Could not launch camera", Toast.LENGTH_SHORT).show()
-      }
-    } else {
-      cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-    }
-  }
-
-  fun launchGallery() {
-    galleryLauncher.launch(
-      PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-    )
-  }
-
-  // Intercept back navigation if pages are pending
-  BackHandler {
-    if (uiState.pages.isNotEmpty() && !uiState.isUploading) {
-      showDiscardDialog = true
-    } else if (!uiState.isUploading) {
-      viewModel.clearAllPages()
-      onNavigateBack()
-    }
-  }
-
-  if (showDiscardDialog) {
-    AlertDialog(
-      onDismissRequest = { showDiscardDialog = false },
-      title = { Text("Discard scanned pages?") },
-      text = { Text("You have ${uiState.pages.size} scanned page(s) that have not been uploaded. If you leave now, they will be lost.") },
-      confirmButton = {
-        Button(
-          onClick = {
-            showDiscardDialog = false
-            viewModel.clearAllPages()
-            onNavigateBack()
-          },
-          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-          modifier = Modifier.testTag("confirm_discard_scan_button"),
-        ) {
-          Text("Discard")
-        }
-      },
-      dismissButton = {
-        TextButton(
-          onClick = { showDiscardDialog = false },
-          modifier = Modifier.testTag("cancel_discard_scan_button"),
-        ) {
-          Text("Keep Scanning")
-        }
-      },
-      shape = RoundedCornerShape(16.dp),
-    )
-  }
-
-  if (showSourcePicker) {
-    SourcePickerBottomSheet(
-      onDismiss = { showSourcePicker = false },
-      onCameraSelect = { launchCamera() },
-      onGallerySelect = { launchGallery() },
-    )
-  }
-
-  // Full-screen page preview dialog
-  val previewUri = uiState.previewPageUri
-  if (previewUri != null) {
-    Dialog(
-      onDismissRequest = { viewModel.setPreviewPageUri(null) },
-      properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-      Box(
-        modifier = Modifier
-          .fillMaxSize()
-          .background(Color.Black)
-          .padding(16.dp),
-      ) {
-        AsyncImage(
-          model = previewUri,
-          contentDescription = "Full page preview",
-          contentScale = ContentScale.Fit,
-          modifier = Modifier.fillMaxSize(),
-        )
-
-        IconButton(
-          onClick = { viewModel.setPreviewPageUri(null) },
-          modifier = Modifier
-            .align(Alignment.TopEnd)
-            .background(Color.Black.copy(alpha = 0.6f), CircleShape),
-        ) {
-          Icon(
-            imageVector = Icons.Default.Close,
-            contentDescription = "Close preview",
-            tint = Color.White,
-          )
-        }
-      }
-    }
-  }
-
-  // Upload Progress Dialog
-  if (uiState.isUploading) {
-    Dialog(
-      onDismissRequest = {}, // Non-dismissible while uploading
-      properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
-    ) {
-      Card(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth(0.9f),
-      ) {
-        Column(
-          modifier = Modifier.padding(28.dp),
-          horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-          CircularProgressIndicator(
-            color = MaterialTheme.colorScheme.primary,
-            strokeWidth = 3.dp,
-            modifier = Modifier.size(44.dp),
-          )
-          Spacer(modifier = Modifier.height(20.dp))
-          Text(
-            text = "Saving Paper Submission",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-          )
-          Spacer(modifier = Modifier.height(8.dp))
-          val progress = uiState.uploadProgress
-          val progressText = if (progress != null) {
-            "Uploading page ${progress.first} of ${progress.second}..."
-          } else {
-            "Preparing files..."
-          }
-          Text(
-            text = progressText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-      }
-    }
-  }
-
   Scaffold(
     topBar = {
-      TopAppBar(
-        title = {
-          Text(
-            text = "Scan Paper",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-          )
-        },
-        navigationIcon = {
-          IconButton(
-            onClick = {
-              if (uiState.pages.isNotEmpty() && !uiState.isUploading) {
-                showDiscardDialog = true
-              } else if (!uiState.isUploading) {
-                viewModel.clearAllPages()
-                onNavigateBack()
-              }
-            },
-            modifier = Modifier.testTag("scan_paper_back_button"),
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Back",
-            )
+      com.example.ui.components.GradeScanStitchHeader(
+        title = "Scan Answer Sheet",
+        subtitle = "Capture or select pages in order",
+        badgeText = "MULTI-PAGE SCANNER",
+        onBackClick = {
+          if (!uiState.isUploading) {
+            onNavigateBack()
           }
         },
-        colors = TopAppBarDefaults.topAppBarColors(
-          containerColor = MaterialTheme.colorScheme.background,
-        ),
+        backTestTag = "scan_paper_back_button",
+        actions = {
+          if (uiState.pages.isNotEmpty()) {
+            Surface(
+              shape = RoundedCornerShape(999.dp),
+              color = Color.White.copy(alpha = 0.2f),
+            ) {
+              Text(
+                text = "${uiState.pages.size} ${if (uiState.pages.size == 1) "Page" else "Pages"}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+              )
+            }
+          }
+        },
       )
     },
+    snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     bottomBar = {
-      Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 4.dp,
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-          horizontalArrangement = Arrangement.spacedBy(12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          FilledTonalButton(
-            onClick = { showSourcePicker = true },
-            enabled = !uiState.isUploading,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-              .weight(1f)
-              .testTag("add_page_button"),
-          ) {
-            Icon(
-              imageVector = Icons.Default.Add,
-              contentDescription = null,
-              modifier = Modifier.size(18.dp),
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Add Page")
-          }
-
-          Button(
-            onClick = {
-              viewModel.finishScan(
-                context = context,
-                studentId = studentId,
-                classId = classId,
-                onSuccess = onScanFinished,
-              )
-            },
-            enabled = uiState.pages.isNotEmpty() && !uiState.isUploading,
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-            modifier = Modifier
-              .weight(1.3f)
-              .testTag("finish_scan_button"),
-          ) {
-            val count = uiState.pages.size
-            Text(if (count > 0) "Finish Scan ($count)" else "Finish Scan")
-          }
+      if (uiState.pages.isNotEmpty()) {
+        val progressText = uiState.uploadProgress?.let { (cur, total) ->
+          "Uploading $cur/$total..."
         }
+        BottomScanActionBar(
+          pageCount = uiState.pages.size,
+          isUploading = uiState.isUploading,
+          uploadProgressText = progressText,
+          onAddPageClick = { showSourcePicker = true },
+          onSaveClick = {
+            viewModel.finishScan(
+              context = context,
+              studentId = studentId,
+              classId = classId,
+              onSuccess = onScanFinished,
+            )
+          },
+        )
       }
     },
-    snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    containerColor = com.example.ui.theme.BackgroundLight,
     modifier = modifier.testTag("scan_paper_screen"),
-  ) { paddingValues ->
+  ) { innerPadding ->
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
-        .padding(paddingValues),
+        .background(com.example.ui.theme.BackgroundLight)
+        .padding(innerPadding),
+      contentAlignment = Alignment.TopCenter,
     ) {
       Column(
         modifier = Modifier
           .fillMaxSize()
-          .padding(horizontal = 16.dp, vertical = 8.dp),
+          .widthIn(max = 600.dp),
       ) {
-        // Upload Error Banner
-        val error = uiState.uploadError
-        if (error != null) {
-          Card(
-            colors = CardDefaults.cardColors(
-              containerColor = MaterialTheme.colorScheme.errorContainer,
-              contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            ),
-            shape = RoundedCornerShape(12.dp),
+        if (uiState.pages.isEmpty()) {
+          // Empty state with clear instructions
+          Column(
             modifier = Modifier
-              .fillMaxWidth()
-              .padding(bottom = 12.dp)
-              .testTag("upload_error_card"),
+              .fillMaxSize()
+              .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
           ) {
-            Row(
-              modifier = Modifier.padding(12.dp),
-              verticalAlignment = Alignment.CenterVertically,
+            InstructionBanner()
+
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+              contentAlignment = Alignment.Center,
+            ) {
+              EmptyPagesState(
+                onAddFirstPage = { showSourcePicker = true }
+              )
+            }
+          }
+        } else {
+          // Multi-page preview grid
+          LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 156.dp),
+            contentPadding = PaddingValues(
+              start = 20.dp,
+              end = 20.dp,
+              top = 16.dp,
+              bottom = 24.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier
+              .fillMaxSize()
+              .testTag("scan_pages_grid"),
+          ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+              InstructionBanner()
+            }
+
+            items(
+              items = uiState.pages,
+              key = { it.id },
+            ) { page ->
+              ScannedPageCard(
+                page = page,
+                isUploading = uiState.isUploading,
+                onPreview = { viewModel.setPreviewPageUri(page.uri) },
+                onRemove = { viewModel.removePage(page.id) },
+              )
+            }
+          }
+        }
+      }
+
+      // Upload progress dialog
+      if (uiState.isUploading) {
+        val progressSubtitle = uiState.uploadProgress?.let { (cur, total) ->
+          "Uploading page $cur of $total to cloud storage..."
+        } ?: "Saving answer sheet pages to cloud storage..."
+
+        GradeScanProgressDialog(
+          title = "Uploading Answer Sheet",
+          subtitle = progressSubtitle,
+        )
+      }
+    }
+  }
+
+  // Fullscreen page preview dialog
+  uiState.previewPageUri?.let { previewUri ->
+    ScannedPagePreviewDialog(
+      uri = previewUri,
+      onDismiss = { viewModel.setPreviewPageUri(null) },
+    )
+  }
+
+  // Camera / Gallery Source Picker Bottom Sheet
+  if (showSourcePicker) {
+    SourcePickerBottomSheet(
+      title = "Add Page ${uiState.pages.size + 1}",
+      subtitle = "Capture with camera or select from your gallery",
+      onDismiss = { showSourcePicker = false },
+      onCameraClick = {
+        showSourcePicker = false
+        val hasCameraPermission = ContextCompat.checkSelfPermission(
+          context,
+          Manifest.permission.CAMERA,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasCameraPermission) {
+          launchCameraCapture()
+        } else {
+          cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+      },
+      onGalleryClick = {
+        showSourcePicker = false
+        val pickRequest = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        addMultipleGalleryLauncher.launch(pickRequest)
+      },
+    )
+  }
+}
+
+@Composable
+private fun InstructionBanner() {
+  Card(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(14.dp),
+    colors = CardDefaults.cardColors(containerColor = LightBlueHighlight),
+    border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(14.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Box(
+        modifier = Modifier
+          .size(40.dp)
+          .clip(RoundedCornerShape(10.dp))
+          .background(Color.White),
+        contentAlignment = Alignment.Center,
+      ) {
+        Icon(
+          imageVector = Icons.Default.DocumentScanner,
+          contentDescription = null,
+          tint = RoyalBlue,
+          modifier = Modifier.size(20.dp),
+        )
+      }
+
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = "Multi-Page Capture",
+          style = MaterialTheme.typography.titleSmall,
+          fontWeight = FontWeight.Bold,
+          color = TextPrimary,
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+          text = "Add pages in sequence (Page 1, Page 2, etc.). Ensure handwriting is clear and well-lit for accurate OCR.",
+          style = MaterialTheme.typography.bodySmall,
+          color = TextSecondary,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun EmptyPagesState(
+  onAddFirstPage: () -> Unit,
+) {
+  Card(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    border = BorderStroke(1.dp, BorderGray),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 24.dp, vertical = 36.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+      Box(
+        modifier = Modifier
+          .size(72.dp)
+          .clip(RoundedCornerShape(20.dp))
+          .background(LightBlueHighlight),
+        contentAlignment = Alignment.Center,
+      ) {
+        Icon(
+          imageVector = Icons.Default.AddAPhoto,
+          contentDescription = null,
+          tint = RoyalBlue,
+          modifier = Modifier.size(34.dp),
+        )
+      }
+
+      Spacer(modifier = Modifier.height(16.dp))
+
+      Text(
+        text = "No Pages Added Yet",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = TextPrimary,
+        textAlign = TextAlign.Center,
+      )
+
+      Spacer(modifier = Modifier.height(6.dp))
+
+      Text(
+        text = "Capture Page 1 of the student's handwritten answer sheet using your camera or select photos from your gallery.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = TextSecondary,
+        textAlign = TextAlign.Center,
+      )
+
+      Spacer(modifier = Modifier.height(24.dp))
+
+      GradeScanPrimaryButton(
+        text = "Add First Page",
+        onClick = onAddFirstPage,
+        icon = Icons.Default.AddAPhoto,
+        testTag = "empty_add_page_button",
+      )
+    }
+  }
+}
+
+@Composable
+private fun ScannedPageCard(
+  page: LocalScannedPage,
+  isUploading: Boolean,
+  onPreview: () -> Unit,
+  onRemove: () -> Unit,
+) {
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .testTag("page_card_${page.pageNumber}"),
+    shape = RoundedCornerShape(14.dp),
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    border = BorderStroke(1.dp, BorderGray),
+  ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .aspectRatio(0.75f)
+          .background(LightBlueHighlight)
+          .clickable(enabled = !isUploading, onClick = onPreview),
+      ) {
+        AsyncImage(
+          model = page.uri,
+          contentDescription = "Page ${page.pageNumber} preview",
+          contentScale = ContentScale.Crop,
+          modifier = Modifier.fillMaxSize(),
+        )
+
+        // Top gradient overlay for readability of badges
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .background(
+              Brush.verticalGradient(
+                colors = listOf(
+                  Color.Black.copy(alpha = 0.55f),
+                  Color.Transparent,
+                )
+              )
+            )
+        )
+
+        // Page number badge
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = RoyalBlue,
+          modifier = Modifier
+            .align(Alignment.TopStart)
+            .padding(10.dp),
+        ) {
+          Text(
+            text = "Page ${page.pageNumber}",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+          )
+        }
+
+        // Action buttons (Preview & Delete)
+        if (!isUploading) {
+          Row(
+            modifier = Modifier
+              .align(Alignment.TopEnd)
+              .padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            IconButton(
+              onClick = onPreview,
+              modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.92f)),
             ) {
               Icon(
-                imageVector = Icons.Default.ErrorOutline,
-                contentDescription = "Error",
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(20.dp),
+                imageVector = Icons.Default.ZoomIn,
+                contentDescription = "Preview Page ${page.pageNumber}",
+                tint = RoyalBlue,
+                modifier = Modifier.size(16.dp),
               )
-              Spacer(modifier = Modifier.width(10.dp))
+            }
+
+            IconButton(
+              onClick = onRemove,
+              modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.92f))
+                .testTag("remove_page_${page.pageNumber}"),
+            ) {
+              Icon(
+                imageVector = Icons.Default.DeleteOutline,
+                contentDescription = "Remove Page ${page.pageNumber}",
+                tint = StatusWarning,
+                modifier = Modifier.size(16.dp),
+              )
+            }
+          }
+        }
+      }
+
+      // Bottom strip
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(Color.White)
+          .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Text(
+            text = "Page ${page.pageNumber}",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary,
+          )
+
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = StatusSuccessContainer,
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+              Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = StatusSuccess,
+                modifier = Modifier.size(11.dp),
+              )
               Text(
-                text = error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f),
+                text = "Ready",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = StatusSuccess,
+                fontSize = 10.sp,
               )
-              IconButton(
-                onClick = viewModel::clearError,
-                modifier = Modifier.size(24.dp),
-              ) {
-                Icon(
-                  imageVector = Icons.Default.Close,
-                  contentDescription = "Dismiss error",
-                  modifier = Modifier.size(16.dp),
-                )
-              }
             }
           }
         }
 
-        if (uiState.pages.isEmpty()) {
-          // Empty State Prompt
-          Box(
-            modifier = Modifier
-              .fillMaxSize()
-              .padding(bottom = 48.dp),
-            contentAlignment = Alignment.Center,
-          ) {
-            Card(
-              shape = RoundedCornerShape(18.dp),
-              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-              elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-              modifier = Modifier.fillMaxWidth(0.9f),
-            ) {
-              Column(
-                modifier = Modifier.padding(28.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-              ) {
-                Surface(
-                  shape = CircleShape,
-                  color = MaterialTheme.colorScheme.primaryContainer,
-                  modifier = Modifier.size(56.dp),
-                ) {
-                  Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                      imageVector = Icons.Default.CameraAlt,
-                      contentDescription = "Camera",
-                      tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                      modifier = Modifier.size(28.dp),
-                    )
-                  }
-                }
+        Text(
+          text = "Tap to view",
+          style = MaterialTheme.typography.labelSmall,
+          color = RoyalBlue,
+          fontWeight = FontWeight.SemiBold,
+          modifier = Modifier.clickable(enabled = !isUploading, onClick = onPreview),
+        )
+      }
+    }
+  }
+}
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                  text = "No pages scanned yet",
-                  style = MaterialTheme.typography.titleMedium,
-                  fontWeight = FontWeight.Bold,
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                  text = "Capture or select handwritten answer sheet pages to assemble this student's paper.",
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  textAlign = TextAlign.Center,
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                  FilledTonalButton(
-                    onClick = { launchCamera() },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("empty_state_camera_button"),
-                  ) {
-                    Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Camera")
-                  }
-
-                  FilledTonalButton(
-                    onClick = { launchGallery() },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("empty_state_gallery_button"),
-                  ) {
-                    Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Gallery")
-                  }
-                }
-              }
-            }
-          }
-        } else {
-          // Review Grid of Scanned Pages
+@Composable
+private fun ScannedPagePreviewDialog(
+  uri: Uri,
+  onDismiss: () -> Unit,
+) {
+  Dialog(onDismissRequest = onDismiss) {
+    Card(
+      modifier = Modifier
+        .fillMaxWidth()
+        .widthIn(max = 520.dp),
+      shape = RoundedCornerShape(24.dp),
+      colors = CardDefaults.cardColors(containerColor = Color.White),
+      border = BorderStroke(1.dp, BorderGray),
+      elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+    ) {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
           Text(
-            text = "Scanned Pages (${uiState.pages.size})",
-            style = MaterialTheme.typography.titleSmall,
+            text = "Page Preview",
+            fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(vertical = 8.dp),
+            color = TextPrimary,
           )
-
-          LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            contentPadding = PaddingValues(bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+          IconButton(
+            onClick = onDismiss,
             modifier = Modifier
-              .fillMaxSize()
-              .testTag("scanned_pages_grid"),
+              .size(32.dp)
+              .clip(CircleShape)
+              .background(LightBlueHighlight)
+              .border(1.dp, BorderGray, CircleShape),
           ) {
-            items(uiState.pages, key = { it.id }) { page ->
-              ScannedPageCard(
-                page = page,
-                onDelete = { viewModel.removePage(page.id) },
-                onPreview = { viewModel.setPreviewPageUri(page.uri) },
+            Icon(
+              imageVector = Icons.Default.Close,
+              contentDescription = "Close Preview",
+              tint = TextSecondary,
+              modifier = Modifier.size(16.dp),
+            )
+          }
+        }
+
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.72f)
+            .clip(RoundedCornerShape(14.dp))
+            .background(LightBlueHighlight)
+            .border(1.dp, BorderGray, RoundedCornerShape(14.dp)),
+        ) {
+          AsyncImage(
+            model = uri,
+            contentDescription = "Scanned page full preview",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize(),
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun BottomScanActionBar(
+  pageCount: Int,
+  isUploading: Boolean,
+  uploadProgressText: String?,
+  onAddPageClick: () -> Unit,
+  onSaveClick: () -> Unit,
+) {
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    color = Color.White,
+    shadowElevation = 6.dp,
+    tonalElevation = 0.dp,
+  ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+      HorizontalDivider(thickness = 1.dp, color = BorderGray)
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 20.dp, vertical = 14.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 600.dp),
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          OutlinedButton(
+            onClick = onAddPageClick,
+            enabled = !isUploading,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, BorderGray),
+            colors = ButtonDefaults.outlinedButtonColors(
+              containerColor = Color.White,
+              contentColor = RoyalBlue,
+            ),
+            modifier = Modifier
+              .weight(1f)
+              .height(50.dp)
+              .testTag("add_page_button"),
+          ) {
+            Icon(
+              imageVector = Icons.Default.AddAPhoto,
+              contentDescription = null,
+              tint = RoyalBlue,
+              modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = "Add Page",
+              style = MaterialTheme.typography.labelLarge,
+              fontWeight = FontWeight.Bold,
+              color = RoyalBlue,
+            )
+          }
+
+          Button(
+            onClick = onSaveClick,
+            enabled = !isUploading && pageCount > 0,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+              containerColor = RoyalBlue,
+              contentColor = Color.White,
+              disabledContainerColor = BorderGray,
+              disabledContentColor = TextSecondary,
+            ),
+            modifier = Modifier
+              .weight(1.35f)
+              .height(50.dp)
+              .testTag("save_paper_button"),
+          ) {
+            if (isUploading) {
+              CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = Color.White,
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = uploadProgressText ?: "Uploading...",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 1,
+              )
+            } else {
+              Icon(
+                imageVector = Icons.Default.CloudUpload,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(18.dp),
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = "Save Sheet ($pageCount)",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
               )
             }
           }
@@ -546,100 +798,16 @@ fun ScanPaperScreen(
   }
 }
 
-@Composable
-fun ScannedPageCard(
-  page: LocalScannedPage,
-  onDelete: () -> Unit,
-  onPreview: () -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  Card(
-    shape = RoundedCornerShape(14.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    modifier = modifier
-      .fillMaxWidth()
-      .testTag("scanned_page_card_${page.pageNumber}"),
-  ) {
-    Column {
-      Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(180.dp)
-          .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
-          .clickable(onClick = onPreview),
-      ) {
-        AsyncImage(
-          model = page.uri,
-          contentDescription = "Page ${page.pageNumber}",
-          contentScale = ContentScale.Crop,
-          modifier = Modifier.fillMaxSize(),
-        )
-
-        // Page number badge
-        Surface(
-          shape = RoundedCornerShape(6.dp),
-          color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
-          modifier = Modifier
-            .align(Alignment.TopStart)
-            .padding(8.dp),
-        ) {
-          Text(
-            text = "Page ${page.pageNumber}",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-          )
-        }
-
-        // Preview overlay button
-        Surface(
-          shape = CircleShape,
-          color = Color.Black.copy(alpha = 0.5f),
-          modifier = Modifier
-            .align(Alignment.BottomEnd)
-            .padding(8.dp)
-            .size(32.dp),
-        ) {
-          Box(contentAlignment = Alignment.Center) {
-            Icon(
-              imageVector = Icons.Default.ZoomIn,
-              contentDescription = "Preview",
-              tint = Color.White,
-              modifier = Modifier.size(18.dp),
-            )
-          }
-        }
-      }
-
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(horizontal = 10.dp, vertical = 6.dp),
-      ) {
-        Text(
-          text = "Page ${page.pageNumber}",
-          style = MaterialTheme.typography.bodyMedium,
-          fontWeight = FontWeight.Medium,
-        )
-
-        IconButton(
-          onClick = onDelete,
-          modifier = Modifier
-            .size(32.dp)
-            .testTag("delete_page_${page.pageNumber}_button"),
-        ) {
-          Icon(
-            imageVector = Icons.Default.Delete,
-            contentDescription = "Remove page",
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(18.dp),
-          )
-        }
-      }
-    }
+private fun createTempImageFileAndUri(context: Context): Pair<File, Uri> {
+  val captureDir = File(context.cacheDir, "camera_captures").apply {
+    if (!exists()) mkdirs()
   }
+  val tempFile = File.createTempFile(
+    "answer_page_${System.currentTimeMillis()}_",
+    ".jpg",
+    captureDir,
+  )
+  val authority = "${context.packageName}.fileprovider"
+  val uri = FileProvider.getUriForFile(context, authority, tempFile)
+  return tempFile to uri
 }

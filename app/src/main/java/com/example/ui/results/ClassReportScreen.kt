@@ -1,6 +1,8 @@
 package com.example.ui.results
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,6 +21,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,11 +39,20 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.model.EvaluationDbRecord
 import com.example.data.model.Student
+import com.example.ui.components.ExamCardSkeleton
+import com.example.ui.components.GradeScanStitchHeader
+import com.example.ui.theme.BackgroundLight
+import com.example.ui.theme.BorderGray
+import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,49 +74,36 @@ fun ClassReportScreen(
 
   Scaffold(
     topBar = {
-      TopAppBar(
-        title = {
-          Text(
-            text = "Class Report",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-          )
-        },
-        navigationIcon = {
-          IconButton(
-            onClick = onNavigateBack,
-            modifier = Modifier.testTag("class_report_back_button"),
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Back",
-            )
-          }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-          containerColor = MaterialTheme.colorScheme.background,
-        ),
+      GradeScanStitchHeader(
+        title = "Class Report",
+        subtitle = classRoom?.subjectName ?: "Summary & Statistics",
+        badgeText = "CLASS ANALYTICS",
+        onBackClick = onNavigateBack,
+        backTestTag = "class_report_back_button",
       )
     },
     snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    containerColor = BackgroundLight,
     modifier = modifier.testTag("class_report_screen"),
   ) { paddingValues ->
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
+        .background(BackgroundLight)
         .padding(paddingValues),
     ) {
       if (uiState.isLoading) {
-        Box(
+        LazyColumn(
+          contentPadding = PaddingValues(20.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
           modifier = Modifier.fillMaxSize(),
-          contentAlignment = Alignment.Center,
         ) {
-          CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+          items(6) { ExamCardSkeleton() }
         }
       } else {
         LazyColumn(
-          contentPadding = PaddingValues(16.dp),
+          contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 88.dp),
+          verticalArrangement = Arrangement.spacedBy(16.dp),
           modifier = Modifier
             .fillMaxSize()
             .testTag("class_report_list"),
@@ -112,76 +111,107 @@ fun ClassReportScreen(
           // Exam / Class Information Card
           item {
             Card(
-              shape = RoundedCornerShape(12.dp),
+              shape = RoundedCornerShape(16.dp),
               colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                containerColor = LightBlueHighlight,
               ),
+              border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
+              elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
               modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp)
                 .testTag("class_report_info_card"),
             ) {
               Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
               ) {
                 Text(
                   text = exam?.name ?: "Exam",
                   style = MaterialTheme.typography.titleMedium,
                   fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.onSurface,
+                  color = TextPrimary,
                 )
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                   text = "Type: ${exam?.type ?: "N/A"} | Date: ${exam?.date ?: "N/A"}",
                   style = MaterialTheme.typography.bodyMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  color = TextSecondary,
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = BorderGray, thickness = 1.dp)
                 Text(
                   text = "Subject: ${classRoom?.subjectName ?: "N/A"}",
                   style = MaterialTheme.typography.bodyLarge,
                   fontWeight = FontWeight.SemiBold,
-                  color = MaterialTheme.colorScheme.primary,
+                  color = RoyalBlue,
                 )
-                Spacer(modifier = Modifier.height(4.dp))
                 Row(
                   modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                  horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                   Text(
                     text = "Session: ${classRoom?.session ?: "N/A"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
                   )
                   Text(
                     text = "Semester: ${classRoom?.semester ?: "N/A"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-                  Text(
-                    text = "Timing: ${classRoom?.timing ?: "N/A"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
                   )
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+              }
+            }
+          }
+
+          // Statistics Overview Card
+          item {
+            Card(
+              shape = RoundedCornerShape(16.dp),
+              colors = CardDefaults.cardColors(containerColor = Color.White),
+              border = BorderStroke(1.dp, BorderGray),
+              elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("class_report_stats_card"),
+            ) {
+              Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+              ) {
                 Text(
-                  text = "Total Marks: ${classRoom?.totalMarks ?: 0}",
-                  style = MaterialTheme.typography.bodyMedium,
+                  text = "Performance Summary",
+                  style = MaterialTheme.typography.titleSmall,
                   fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.onSurface,
+                  color = TextPrimary,
                 )
+
+                val evaluatedCount = uiState.evaluationsByStudentId.size
+                val totalStudents = uiState.students.size
+                val passingCount = uiState.evaluationsByStudentId.values.count { ev ->
+                  val ob = ev.totalMarksObtained ?: 0.0
+                  val tot = ev.totalMarks ?: classRoom?.totalMarks?.toDouble() ?: 100.0
+                  val pct = ev.percentage ?: if (tot > 0) (ob / tot) * 100 else 0.0
+                  pct >= 50.0
+                }
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                  StatItem(label = "Total Students", value = totalStudents.toString())
+                  StatItem(label = "Graded / Approved", value = evaluatedCount.toString())
+                  StatItem(label = "Passing (>=50%)", value = passingCount.toString())
+                }
               }
             }
           }
 
           item {
             Text(
-              text = "Student Results",
+              text = "Student Result Breakdown",
               style = MaterialTheme.typography.titleMedium,
               fontWeight = FontWeight.Bold,
-              color = MaterialTheme.colorScheme.onSurface,
-              modifier = Modifier.padding(bottom = 12.dp, start = 4.dp),
+              color = TextPrimary,
+              modifier = Modifier.padding(top = 4.dp, start = 2.dp),
             )
           }
 
@@ -196,7 +226,7 @@ fun ClassReportScreen(
                 Text(
                   text = "No students enrolled in this class.",
                   style = MaterialTheme.typography.bodyMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  color = TextSecondary,
                 )
               }
             }
@@ -220,89 +250,104 @@ fun ClassReportScreen(
 }
 
 @Composable
-fun ClassReportStudentCard(
+private fun StatItem(
+  label: String,
+  value: String,
+  modifier: Modifier = Modifier,
+) {
+  Column(
+    modifier = modifier,
+    verticalArrangement = Arrangement.spacedBy(2.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    Text(
+      text = value,
+      style = MaterialTheme.typography.titleLarge,
+      fontWeight = FontWeight.Bold,
+      color = RoyalBlue,
+    )
+    Text(
+      text = label,
+      style = MaterialTheme.typography.labelSmall,
+      color = TextSecondary,
+      textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+    )
+  }
+}
+
+@Composable
+private fun ClassReportStudentCard(
   student: Student,
   evaluation: EvaluationDbRecord?,
   classTotalMarks: Double,
+  modifier: Modifier = Modifier,
 ) {
-  val obtained = evaluation?.totalMarksObtained ?: 0.0
-  val percentage = if (classTotalMarks > 0) (obtained / classTotalMarks) * 100 else 0.0
-  val status = evaluation?.status ?: "Pending"
-
   Card(
-    shape = RoundedCornerShape(12.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surface,
-    ),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    modifier = Modifier
-      .fillMaxWidth()
-      .padding(vertical = 6.dp)
-      .testTag("class_report_student_card_${student.id ?: ""}"),
+    shape = RoundedCornerShape(14.dp),
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    border = BorderStroke(1.dp, BorderGray),
+    modifier = modifier.fillMaxWidth(),
   ) {
-    Column(
+    Row(
       modifier = Modifier
         .fillMaxWidth()
         .padding(16.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+      Column(
+        modifier = Modifier.weight(1f),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
       ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = student.name,
+          style = MaterialTheme.typography.titleSmall,
+          fontWeight = FontWeight.SemiBold,
+          color = TextPrimary,
+        )
+        Text(
+          text = "Roll No: ${student.rollNumber}",
+          style = MaterialTheme.typography.bodySmall,
+          color = TextSecondary,
+        )
+      }
+
+      if (evaluation != null) {
+        val obtained = evaluation.totalMarksObtained ?: 0.0
+        val total = evaluation.totalMarks ?: classTotalMarks
+        val pct = evaluation.percentage ?: if (total > 0) (obtained / total) * 100 else 0.0
+
+        val formattedObtained = if (obtained % 1.0 == 0.0) obtained.toInt().toString() else obtained.toString()
+        val formattedTotal = if (total % 1.0 == 0.0) total.toInt().toString() else total.toString()
+
+        Column(horizontalAlignment = Alignment.End) {
           Text(
-            text = student.name,
-            style = MaterialTheme.typography.titleMedium,
+            text = "$formattedObtained / $formattedTotal",
+            style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = RoyalBlue,
           )
           Spacer(modifier = Modifier.height(2.dp))
           Text(
-            text = "Roll No: ${student.rollNumber}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = String.format("%.0f%%", pct),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = TextSecondary,
           )
         }
+      } else {
         Surface(
-          shape = RoundedCornerShape(8.dp),
-          color = if (status.equals("approved", ignoreCase = true)) {
-            MaterialTheme.colorScheme.primaryContainer
-          } else {
-            MaterialTheme.colorScheme.surfaceVariant
-          },
+          shape = RoundedCornerShape(6.dp),
+          color = LightBlueHighlight,
         ) {
           Text(
-            text = status.replaceFirstChar { it.uppercase() },
-            style = MaterialTheme.typography.labelMedium,
-            color = if (status.equals("approved", ignoreCase = true)) {
-              MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-              MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            text = "Pending",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
           )
         }
-      }
-
-      Spacer(modifier = Modifier.height(8.dp))
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-      ) {
-        Text(
-          text = "Obtained Marks: %.1f / %.1f".format(obtained, classTotalMarks),
-          style = MaterialTheme.typography.bodyMedium,
-          fontWeight = FontWeight.SemiBold,
-          color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-          text = "Percentage: %.1f%%".format(percentage),
-          style = MaterialTheme.typography.bodyMedium,
-          fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.primary,
-        )
       }
     }
   }

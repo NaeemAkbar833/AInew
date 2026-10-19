@@ -1,7 +1,10 @@
 package com.example.ui.student
 
-import android.net.Uri
 import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,7 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -29,52 +33,65 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Grade
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SupervisorAccount
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WbTwilight
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Student
-import com.example.ui.theme.TertiaryAmber
-
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
-import com.example.ui.student.ImportReviewDialog
+import com.example.ui.components.GradeScanStitchHeader
+import com.example.ui.theme.AccentViolet
+import com.example.ui.theme.AccentVioletContainer
+import com.example.ui.theme.BackgroundLight
+import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
+import com.example.ui.theme.DarkRoyalBlue
+import com.example.ui.theme.FigtreeFontFamily
+import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.PrimaryBlueGradient
+import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.SecondaryTeal
+import com.example.ui.theme.SecondaryTealContainer
+import com.example.ui.theme.StatusAmber
+import com.example.ui.theme.StatusSuccess
+import com.example.ui.theme.StatusWarning
+import com.example.ui.theme.StatusWarningContainer
+import com.example.ui.theme.TertiaryAmberContainer
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,15 +116,6 @@ fun ClassDetailScreen(
         photoUri?.let { uri ->
           viewModel.addPendingPage(uri)
         }
-      }
-    }
-  )
-
-  val photoPickerLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.PickMultipleVisualMedia(),
-    onResult = { uris ->
-      if (uris.isNotEmpty()) {
-        viewModel.onImagesSelected(context, classId, uris)
       }
     }
   )
@@ -165,92 +173,41 @@ fun ClassDetailScreen(
     )
   }
 
-  // Delete Student Confirmation Dialog
   if (studentToDelete != null) {
-    AlertDialog(
-      onDismissRequest = {
-        if (!uiState.isDeleting) studentToDelete = null
-      },
-      title = {
-        Text(
-          text = "Delete this student?",
-          fontWeight = FontWeight.Bold,
-          style = MaterialTheme.typography.titleLarge,
-        )
-      },
-      text = {
-        Text(
-          text = "Are you sure you want to permanently delete \"${studentToDelete?.name}\" (Roll No: ${studentToDelete?.rollNumber})? This action cannot be undone.",
-          style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            studentToDelete?.id?.let { sid ->
-              viewModel.deleteStudent(sid) {
-                studentToDelete = null
-              }
-            }
-          },
-          enabled = !uiState.isDeleting,
-          colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.error,
-            contentColor = MaterialTheme.colorScheme.onError,
-          ),
-          shape = RoundedCornerShape(10.dp),
-          modifier = Modifier.testTag("confirm_delete_student_button"),
-        ) {
-          if (uiState.isDeleting) {
-            CircularProgressIndicator(
-              color = MaterialTheme.colorScheme.onError,
-              strokeWidth = 2.dp,
-              modifier = Modifier.size(16.dp),
-            )
-          } else {
-            Text("Delete")
+    com.example.ui.components.GradeScanConfirmationDialog(
+      title = "Delete this student?",
+      subtitle = "Permanent deletion",
+      message = "Are you sure you want to permanently delete \"${studentToDelete?.name}\" (Roll No: ${studentToDelete?.rollNumber})? This action cannot be undone.",
+      confirmText = "Delete",
+      dismissText = "Cancel",
+      icon = Icons.Default.DeleteOutline,
+      isDestructive = true,
+      isLoading = uiState.isDeleting,
+      dialogTestTag = "delete_student_dialog",
+      confirmTestTag = "confirm_delete_student_button",
+      dismissTestTag = "cancel_delete_student_button",
+      onConfirm = {
+        studentToDelete?.id?.let { sid ->
+          viewModel.deleteStudent(sid) {
+            studentToDelete = null
           }
         }
       },
-      dismissButton = {
-        TextButton(
-          onClick = { studentToDelete = null },
-          enabled = !uiState.isDeleting,
-          modifier = Modifier.testTag("cancel_delete_student_button"),
-        ) {
-          Text("Cancel")
-        }
+      onDismiss = {
+        if (!uiState.isDeleting) studentToDelete = null
       },
-      shape = RoundedCornerShape(18.dp),
-      modifier = Modifier.testTag("delete_student_dialog"),
     )
   }
 
   Scaffold(
+    containerColor = BackgroundLight,
     topBar = {
-      TopAppBar(
-        title = {
-          Text(
-            text = uiState.classRoom?.subjectName ?: "Class Details",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-          )
-        },
-        navigationIcon = {
-          IconButton(
-            onClick = onNavigateBack,
-            modifier = Modifier.testTag("class_detail_back_button"),
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Back",
-            )
-          }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-          containerColor = MaterialTheme.colorScheme.background,
-        ),
+      GradeScanStitchHeader(
+        title = uiState.classRoom?.subjectName ?: "Class Details",
+        subtitle = uiState.classRoom?.let { "${it.session} • ${it.semester} Semester • ${it.timing}" } ?: "Enrolled student roster",
+        badgeText = "CLASS ROSTER",
+        onBackClick = onNavigateBack,
+        backTestTag = "class_detail_back_button",
       )
     },
     snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -259,7 +216,7 @@ fun ClassDetailScreen(
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
+        .background(BackgroundLight)
         .padding(paddingValues),
     ) {
       if (uiState.isLoading && uiState.students.isEmpty() && uiState.classRoom == null) {
@@ -268,8 +225,7 @@ fun ClassDetailScreen(
           contentAlignment = Alignment.Center,
         ) {
           CircularProgressIndicator(
-            color = MaterialTheme.colorScheme.primary,
-            strokeWidth = 3.dp,
+            color = RoyalBlue,
           )
         }
       } else {
@@ -277,19 +233,19 @@ fun ClassDetailScreen(
           modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = 20.dp, vertical = 18.dp),
         ) {
-          // Class Information Card
           val classRoom = uiState.classRoom
           if (classRoom != null) {
             val isMorning = classRoom.timing.equals("Morning", ignoreCase = true)
-            val timingBadgeBg = if (isMorning) Color(0xFFFEF3C7) else Color(0xFFEDE9FE)
-            val timingBadgeFg = if (isMorning) TertiaryAmber else Color(0xFF5B21B6)
+            val timingBadgeBg = if (isMorning) TertiaryAmberContainer else AccentVioletContainer
+            val timingBadgeFg = if (isMorning) StatusAmber else AccentViolet
             val timingIcon = if (isMorning) Icons.Default.WbSunny else Icons.Default.WbTwilight
 
             Card(
-              shape = RoundedCornerShape(18.dp),
-              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+              shape = RoundedCornerShape(20.dp),
+              colors = CardDefaults.cardColors(containerColor = Color.White),
+              border = BorderStroke(1.dp, BorderGray),
               elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
               modifier = Modifier
                 .fillMaxWidth()
@@ -305,21 +261,44 @@ fun ClassDetailScreen(
                   horizontalArrangement = Arrangement.SpaceBetween,
                   modifier = Modifier.fillMaxWidth(),
                 ) {
-                  Text(
-                    text = classRoom.subjectName,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.weight(1f),
-                  )
+                  ) {
+                    Surface(
+                      shape = RoundedCornerShape(14.dp),
+                      color = SecondaryTealContainer,
+                      modifier = Modifier.size(48.dp),
+                    ) {
+                      Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                          imageVector = Icons.Default.School,
+                          contentDescription = null,
+                          tint = SecondaryTeal,
+                          modifier = Modifier.size(24.dp),
+                        )
+                      }
+                    }
+
+                    Text(
+                      text = classRoom.subjectName,
+                      fontFamily = BricolageGrotesqueFontFamily,
+                      fontSize = 19.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = TextPrimary,
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.width(8.dp))
 
                   Surface(
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = timingBadgeBg,
                   ) {
                     Row(
                       verticalAlignment = Alignment.CenterVertically,
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                      modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                     ) {
                       Icon(
                         imageVector = timingIcon,
@@ -331,14 +310,17 @@ fun ClassDetailScreen(
                       Text(
                         text = classRoom.timing,
                         color = timingBadgeFg,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FigtreeFontFamily,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
                       )
                     }
                   }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = BorderGray, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Row(
                   verticalAlignment = Alignment.CenterVertically,
@@ -348,14 +330,16 @@ fun ClassDetailScreen(
                     Icon(
                       imageVector = Icons.Default.CalendarMonth,
                       contentDescription = null,
-                      tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                      modifier = Modifier.size(16.dp),
+                      tint = TextSecondary,
+                      modifier = Modifier.size(15.dp),
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                       text = classRoom.session,
-                      style = MaterialTheme.typography.bodyMedium,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 13.sp,
+                      color = TextSecondary,
+                      fontWeight = FontWeight.Medium,
                     )
                   }
 
@@ -363,14 +347,16 @@ fun ClassDetailScreen(
                     Icon(
                       imageVector = Icons.Default.School,
                       contentDescription = null,
-                      tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                      modifier = Modifier.size(16.dp),
+                      tint = TextSecondary,
+                      modifier = Modifier.size(15.dp),
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                       text = classRoom.semester,
-                      style = MaterialTheme.typography.bodyMedium,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 13.sp,
+                      color = TextSecondary,
+                      fontWeight = FontWeight.Medium,
                     )
                   }
 
@@ -378,25 +364,26 @@ fun ClassDetailScreen(
                     Icon(
                       imageVector = Icons.Default.Grade,
                       contentDescription = null,
-                      tint = MaterialTheme.colorScheme.primary,
-                      modifier = Modifier.size(16.dp),
+                      tint = RoyalBlue,
+                      modifier = Modifier.size(15.dp),
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                       text = "${classRoom.totalMarks} Marks",
-                      style = MaterialTheme.typography.bodyMedium,
-                      fontWeight = FontWeight.Medium,
-                      color = MaterialTheme.colorScheme.onSurface,
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = TextPrimary,
                     )
                   }
                 }
               }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(24.dp))
           }
 
-          // Students Section Header with "+ Add Student" Button
+          // Students Section Header
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -408,21 +395,23 @@ fun ClassDetailScreen(
             ) {
               Text(
                 text = "Students",
-                style = MaterialTheme.typography.titleMedium,
+                fontFamily = BricolageGrotesqueFontFamily,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = TextPrimary,
               )
               if (uiState.students.isNotEmpty()) {
                 Surface(
-                  shape = RoundedCornerShape(12.dp),
-                  color = MaterialTheme.colorScheme.primaryContainer,
+                  shape = RoundedCornerShape(10.dp),
+                  color = LightBlueHighlight,
                 ) {
                   Text(
                     text = "${uiState.students.size}",
-                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FigtreeFontFamily,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    color = DarkRoyalBlue,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp),
                   )
                 }
               }
@@ -433,17 +422,17 @@ fun ClassDetailScreen(
               horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
               if (uiState.pendingCaptureUris.isNotEmpty() && !uiState.isExtracting) {
-                // Multi-page capture controls
                 Surface(
-                  shape = RoundedCornerShape(12.dp),
-                  color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                  shape = RoundedCornerShape(10.dp),
+                  color = LightBlueHighlight,
                 ) {
                   Text(
                     text = "${uiState.pendingCaptureUris.size} Pages",
-                    style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FigtreeFontFamily,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    color = DarkRoyalBlue,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                   )
                 }
 
@@ -456,7 +445,7 @@ fun ClassDetailScreen(
                   Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = "Finish and Extract",
-                    tint = Color(0xFF10B981) // Emerald
+                    tint = StatusSuccess
                   )
                 }
 
@@ -467,7 +456,7 @@ fun ClassDetailScreen(
                   Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Cancel Scan",
-                    tint = MaterialTheme.colorScheme.error
+                    tint = StatusWarning
                   )
                 }
               }
@@ -479,51 +468,71 @@ fun ClassDetailScreen(
                   cameraLauncher.launch(uri)
                 },
                 enabled = !uiState.isExtracting,
-                modifier = Modifier.testTag("scan_student_list_button")
+                modifier = Modifier
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(LightBlueHighlight)
+                  .size(40.dp)
+                  .testTag("scan_student_list_button")
               ) {
                 if (uiState.isExtracting) {
                   CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(18.dp),
                     strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary
+                    color = RoyalBlue
                   )
                 } else {
                   Icon(
                     imageVector = Icons.Default.PhotoCamera,
                     contentDescription = if (uiState.pendingCaptureUris.isEmpty()) "Scan Student List" else "Add another page",
-                    tint = if (uiState.pendingCaptureUris.isEmpty()) MaterialTheme.colorScheme.primary else Color(0xFFF59E0B) // Amber
+                    tint = if (uiState.pendingCaptureUris.isEmpty()) DarkRoyalBlue else StatusAmber,
+                    modifier = Modifier.size(18.dp),
                   )
                 }
               }
 
               if (uiState.pendingCaptureUris.isEmpty()) {
-                OutlinedButton(
-                  onClick = viewModel::openAddDialog,
-                  shape = RoundedCornerShape(10.dp),
-                  modifier = Modifier.testTag("add_student_button"),
+                val btnShape = RoundedCornerShape(12.dp)
+                Box(
+                  modifier = Modifier
+                    .heightIn(min = 40.dp)
+                    .shadow(elevation = 2.dp, shape = btnShape, spotColor = DarkRoyalBlue.copy(alpha = 0.25f))
+                    .clip(btnShape)
+                    .background(PrimaryBlueGradient)
+                    .clickable(onClick = viewModel::openAddDialog)
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .testTag("add_student_button"),
+                  contentAlignment = Alignment.Center,
                 ) {
-                  Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                  )
-                  Spacer(modifier = Modifier.width(4.dp))
-                  Text(
-                    text = "Add Student",
-                    style = MaterialTheme.typography.labelMedium,
-                  )
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                      imageVector = Icons.Default.Add,
+                      contentDescription = null,
+                      tint = Color.White,
+                      modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                      text = "Add Student",
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 13.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color.White,
+                    )
+                  }
                 }
               }
             }
-        }
+          }
 
-        if (uiState.isExtracting) {
+          if (uiState.isExtracting) {
             Spacer(modifier = Modifier.height(8.dp))
             LinearProgressIndicator(
               progress = { uiState.extractionProgress },
-              modifier = Modifier.fillMaxWidth().height(4.dp),
-              color = MaterialTheme.colorScheme.primary,
-              trackColor = MaterialTheme.colorScheme.primaryContainer
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp),
+              color = RoyalBlue,
+              trackColor = LightBlueHighlight,
             )
             Text(
               text = when {
@@ -533,8 +542,10 @@ fun ClassDetailScreen(
                 uiState.extractionProgress < 0.95f -> "Processing student list..."
                 else -> "Finalizing..."
               },
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.primary,
+              fontFamily = FigtreeFontFamily,
+              fontSize = 11.5.sp,
+              color = RoyalBlue,
+              fontWeight = FontWeight.SemiBold,
               modifier = Modifier.padding(top = 4.dp)
             )
           }
@@ -550,7 +561,7 @@ fun ClassDetailScreen(
                 contentAlignment = Alignment.Center,
               ) {
                 CircularProgressIndicator(
-                  color = MaterialTheme.colorScheme.primary,
+                  color = RoyalBlue,
                   strokeWidth = 2.dp,
                   modifier = Modifier.size(24.dp),
                 )
@@ -558,11 +569,11 @@ fun ClassDetailScreen(
             }
 
             uiState.students.isEmpty() -> {
-              // Students Empty State
               Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, BorderGray),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 modifier = Modifier
                   .fillMaxWidth()
                   .testTag("students_empty_state_card"),
@@ -575,14 +586,14 @@ fun ClassDetailScreen(
                 ) {
                   Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.size(48.dp),
+                    color = LightBlueHighlight,
+                    modifier = Modifier.size(52.dp),
                   ) {
                     Box(contentAlignment = Alignment.Center) {
                       Icon(
                         imageVector = Icons.Default.Group,
                         contentDescription = "No students",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = RoyalBlue,
                         modifier = Modifier.size(24.dp),
                       )
                     }
@@ -592,44 +603,60 @@ fun ClassDetailScreen(
 
                   Text(
                     text = "No students added yet",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    fontFamily = BricolageGrotesqueFontFamily,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
                   )
 
                   Spacer(modifier = Modifier.height(4.dp))
 
                   Text(
                     text = "Tap '+ Add Student' to enroll students in this class.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    fontFamily = FigtreeFontFamily,
+                    fontSize = 13.sp,
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center,
                   )
 
-                  Spacer(modifier = Modifier.height(16.dp))
+                  Spacer(modifier = Modifier.height(18.dp))
 
-                  Button(
-                    onClick = viewModel::openAddDialog,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.testTag("empty_state_add_student_button"),
+                  val emptyBtnShape = RoundedCornerShape(14.dp)
+                  Box(
+                    modifier = Modifier
+                      .heightIn(min = 44.dp)
+                      .shadow(elevation = 2.dp, shape = emptyBtnShape, spotColor = DarkRoyalBlue.copy(alpha = 0.25f))
+                      .clip(emptyBtnShape)
+                      .background(PrimaryBlueGradient)
+                      .clickable(onClick = viewModel::openAddDialog)
+                      .padding(horizontal = 20.dp, vertical = 10.dp)
+                      .testTag("empty_state_add_student_button"),
+                    contentAlignment = Alignment.Center,
                   ) {
-                    Icon(
-                      imageVector = Icons.Default.Add,
-                      contentDescription = null,
-                      modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add Student")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp),
+                      )
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text(
+                        text = "Add Student",
+                        fontFamily = FigtreeFontFamily,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                      )
+                    }
                   }
                 }
               }
             }
 
             else -> {
-              // Student List
               Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
                   .testTag("students_list"),
@@ -661,54 +688,79 @@ fun StudentCard(
   onDeleteClick: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
+  val shape = RoundedCornerShape(20.dp)
   Card(
-    shape = RoundedCornerShape(14.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    shape = shape,
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    border = BorderStroke(1.dp, BorderGray),
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     modifier = modifier
       .fillMaxWidth()
+      .clip(shape)
       .clickable(onClick = onClick)
       .testTag("student_card_${student.rollNumber}"),
   ) {
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 16.dp, vertical = 14.dp),
+        .padding(horizontal = 18.dp, vertical = 16.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
+      Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = LightBlueHighlight,
+        modifier = Modifier.size(44.dp),
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          Icon(
+            imageVector = Icons.Default.Person,
+            contentDescription = null,
+            tint = RoyalBlue,
+            modifier = Modifier.size(22.dp),
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.width(12.dp))
+
       Column(modifier = Modifier.weight(1f)) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
           Text(
             text = student.name,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
+            fontFamily = BricolageGrotesqueFontFamily,
+            fontSize = 16.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
           )
 
           Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = MaterialTheme.colorScheme.secondaryContainer,
+            shape = RoundedCornerShape(8.dp),
+            color = LightBlueHighlight,
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             ) {
               Icon(
                 imageVector = Icons.Default.Badge,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                tint = DarkRoyalBlue,
                 modifier = Modifier.size(12.dp),
               )
               Spacer(modifier = Modifier.width(4.dp))
               Text(
                 text = student.rollNumber,
-                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FigtreeFontFamily,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                color = DarkRoyalBlue,
               )
             }
           }
@@ -723,13 +775,17 @@ fun StudentCard(
           Icon(
             imageVector = Icons.Default.SupervisorAccount,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = TextSecondary,
             modifier = Modifier.size(14.dp),
           )
           Text(
             text = "Father: ${student.fatherName}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FigtreeFontFamily,
+            fontSize = 13.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
           )
         }
       }
@@ -738,15 +794,26 @@ fun StudentCard(
         onClick = onDeleteClick,
         modifier = Modifier
           .size(36.dp)
+          .clip(CircleShape)
+          .background(StatusWarningContainer.copy(alpha = 0.6f))
           .testTag("student_delete_button_${student.rollNumber}"),
       ) {
         Icon(
           imageVector = Icons.Default.DeleteOutline,
           contentDescription = "Delete Student",
-          tint = MaterialTheme.colorScheme.error,
+          tint = StatusWarning,
           modifier = Modifier.size(18.dp),
         )
       }
+
+      Spacer(modifier = Modifier.width(6.dp))
+
+      Icon(
+        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+        contentDescription = "Open Student",
+        tint = TextSecondary,
+        modifier = Modifier.size(13.dp),
+      )
     }
   }
 }

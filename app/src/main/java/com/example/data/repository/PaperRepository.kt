@@ -11,6 +11,7 @@ import com.example.data.model.StudentPaper
 import com.example.data.model.StudentPaperPage
 import com.example.data.remote.SupabaseClientProvider
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +52,7 @@ class SupabasePaperRepository(
           ?: return@withContext Result.failure(IllegalStateException("Teacher is not authenticated."))
 
         val papers = SupabaseClientProvider.client.postgrest["student_papers"]
-          .select {
+          .select(Columns.raw("*, evaluation:student_paper_evaluations(status)")) {
             filter {
               eq("student_id", studentId)
               eq("teacher_id", teacherId)

@@ -1,6 +1,7 @@
 package com.example.ui.results
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,19 +13,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Feedback
-import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.WarningAmber
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,6 +50,17 @@ import com.example.data.model.EvaluationDetail
 import com.example.data.model.EvaluationQuestion
 import com.example.ui.theme.TertiaryAmber
 import com.example.ui.theme.TertiaryAmberContainer
+import com.example.ui.components.ExamCardSkeleton
+import com.example.ui.components.GradeScanStitchHeader
+import com.example.ui.components.SkeletonBox
+import com.example.ui.theme.BackgroundLight
+import com.example.ui.theme.BorderGray
+import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.StatusSuccess
+import com.example.ui.theme.StatusSuccessContainer
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,74 +81,55 @@ fun StudentResultDetailScreen(
   val classRoom = uiState.classRoom
   val evaluation = uiState.evaluation
 
+  val subtext = buildString {
+    student?.rollNumber?.let { append("Roll No: $it") }
+    if (!student?.rollNumber.isNullOrBlank() && !classRoom?.subjectName.isNullOrBlank()) {
+      append(" • ")
+    }
+    classRoom?.subjectName?.let { append(it) }
+  }
+
   Scaffold(
     topBar = {
-      TopAppBar(
-        title = {
-          Column {
-            Text(
-              text = student?.name ?: "Student Result Detail",
-              style = MaterialTheme.typography.titleLarge,
-              fontWeight = FontWeight.Bold,
-            )
-            val subtext = buildString {
-              student?.rollNumber?.let { append("Roll No: $it") }
-              if (!student?.rollNumber.isNullOrBlank() && !classRoom?.subjectName.isNullOrBlank()) {
-                append(" • ")
-              }
-              classRoom?.subjectName?.let { append(it) }
-            }
-            if (subtext.isNotBlank()) {
-              Text(
-                text = subtext,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-              )
-            }
-          }
-        },
-        navigationIcon = {
-          IconButton(
-            onClick = onNavigateBack,
-            modifier = Modifier.testTag("student_result_detail_back_button"),
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Back",
-            )
-          }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-          containerColor = MaterialTheme.colorScheme.background,
-        ),
+      GradeScanStitchHeader(
+        title = student?.name ?: "Student Result Detail",
+        subtitle = subtext.ifBlank { "Approved Evaluation Breakdown" },
+        badgeText = "STUDENT REPORT",
+        onBackClick = onNavigateBack,
+        backTestTag = "student_result_detail_back_button",
       )
     },
+    containerColor = BackgroundLight,
     modifier = modifier.testTag("student_result_detail_screen"),
   ) { paddingValues ->
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
+        .background(BackgroundLight)
         .padding(paddingValues),
     ) {
       if (uiState.isLoading) {
-        Box(
-          modifier = Modifier.fillMaxSize(),
-          contentAlignment = Alignment.Center,
+        Column(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(20.dp),
+          verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-          CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+          SkeletonBox(modifier = Modifier.fillMaxWidth().height(100.dp), shape = RoundedCornerShape(16.dp))
+          repeat(4) { ExamCardSkeleton() }
         }
       } else if (evaluation == null) {
         // No Approved Result Available state
         Box(
           modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(24.dp),
           contentAlignment = Alignment.Center,
         ) {
           Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+            colors = CardDefaults.cardColors(containerColor = LightBlueHighlight),
+            border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
             modifier = Modifier.fillMaxWidth(),
           ) {
             Column(
@@ -149,9 +139,9 @@ fun StudentResultDetailScreen(
                 .padding(32.dp),
             ) {
               Icon(
-                imageVector = Icons.Default.HelpOutline,
+                imageVector = Icons.AutoMirrored.Filled.HelpOutline,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = RoyalBlue,
                 modifier = Modifier.size(48.dp),
               )
               Spacer(modifier = Modifier.height(16.dp))
@@ -159,21 +149,22 @@ fun StudentResultDetailScreen(
                 text = "No Approved Result Available",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = TextPrimary,
               )
               Spacer(modifier = Modifier.height(8.dp))
               Text(
                 text = "This student does not have an approved evaluation for this class yet.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                color = TextSecondary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
               )
             }
           }
         }
       } else {
         LazyColumn(
-          contentPadding = PaddingValues(16.dp),
+          contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 88.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
           modifier = Modifier
             .fillMaxSize()
             .testTag("student_result_detail_list"),
@@ -181,7 +172,6 @@ fun StudentResultDetailScreen(
           // 1. Overall Score & Percentage Card
           item {
             ResultSummaryCard(evaluation = evaluation)
-            Spacer(modifier = Modifier.height(16.dp))
           }
 
           // 2. Review Warning Banner if required
@@ -190,7 +180,6 @@ fun StudentResultDetailScreen(
               ResultReviewWarningBanner(
                 reviewReason = evaluation.reviewReason ?: "Some question marks or grading details require teacher attention.",
               )
-              Spacer(modifier = Modifier.height(16.dp))
             }
           }
 
@@ -200,8 +189,8 @@ fun StudentResultDetailScreen(
               text = "Question Breakdown (${evaluation.questions.size})",
               style = MaterialTheme.typography.titleMedium,
               fontWeight = FontWeight.Bold,
-              color = MaterialTheme.colorScheme.onSurface,
-              modifier = Modifier.padding(bottom = 12.dp, start = 4.dp),
+              color = TextPrimary,
+              modifier = Modifier.padding(top = 4.dp, bottom = 4.dp, start = 2.dp),
             )
           }
 
@@ -214,7 +203,6 @@ fun StudentResultDetailScreen(
               question = question,
               index = index,
             )
-            Spacer(modifier = Modifier.height(12.dp))
           }
         }
       }
@@ -236,7 +224,9 @@ private fun ResultSummaryCard(
 
   Card(
     shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    colors = CardDefaults.cardColors(containerColor = LightBlueHighlight),
+    border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     modifier = modifier
       .fillMaxWidth()
       .testTag("result_summary_card"),
@@ -248,41 +238,40 @@ private fun ResultSummaryCard(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
     ) {
-      Column {
+      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
           text = "OVERALL RESULT",
           style = MaterialTheme.typography.labelSmall,
           fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+          color = RoyalBlue,
         )
-        Spacer(modifier = Modifier.height(4.dp))
         Text(
           text = "$formattedObtained / $formattedTotal Marks",
           style = MaterialTheme.typography.headlineSmall,
           fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.onPrimaryContainer,
+          color = TextPrimary,
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
         Surface(
           shape = RoundedCornerShape(8.dp),
-          color = MaterialTheme.colorScheme.primary,
+          color = StatusSuccessContainer,
         ) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
           ) {
             Icon(
               imageVector = Icons.Default.CheckCircle,
               contentDescription = null,
-              tint = MaterialTheme.colorScheme.onPrimary,
-              modifier = Modifier.size(14.dp),
+              tint = StatusSuccess,
+              modifier = Modifier.size(15.dp),
             )
             Text(
               text = "Approved (${String.format("%.1f%%", percentage)})",
               style = MaterialTheme.typography.labelMedium,
               fontWeight = FontWeight.Bold,
-              color = MaterialTheme.colorScheme.onPrimary,
+              color = StatusSuccess,
             )
           }
         }
@@ -299,8 +288,10 @@ private fun ResultReviewWarningBanner(
   Card(
     shape = RoundedCornerShape(12.dp),
     colors = CardDefaults.cardColors(
-      containerColor = TertiaryAmberContainer.copy(alpha = 0.85f)
+      containerColor = TertiaryAmberContainer
     ),
+    border = BorderStroke(1.dp, TertiaryAmber.copy(alpha = 0.3f)),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     modifier = modifier
       .fillMaxWidth()
       .testTag("result_review_warning_banner"),
@@ -316,18 +307,17 @@ private fun ResultReviewWarningBanner(
         tint = TertiaryAmber,
         modifier = Modifier.size(20.dp),
       )
-      Column {
+      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
           text = "Teacher Review Recommended",
           style = MaterialTheme.typography.titleSmall,
           fontWeight = FontWeight.Bold,
           color = TertiaryAmber,
         )
-        Spacer(modifier = Modifier.height(2.dp))
         Text(
           text = reviewReason,
           style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = TextPrimary,
         )
       }
     }
@@ -347,10 +337,9 @@ private fun ResultQuestionCard(
 
   Card(
     shape = RoundedCornerShape(14.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surface
-    ),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    border = BorderStroke(1.dp, BorderGray),
     modifier = modifier
       .fillMaxWidth()
       .testTag("result_question_card_$qNum"),
@@ -368,26 +357,26 @@ private fun ResultQuestionCard(
       ) {
         Surface(
           shape = RoundedCornerShape(6.dp),
-          color = MaterialTheme.colorScheme.primaryContainer,
+          color = LightBlueHighlight,
         ) {
           Text(
             text = "Question $qNum",
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = RoyalBlue,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
           )
         }
 
         val marksContainerColor = when {
-          isFullMarks -> Color(0xFFDCFCE7) // Soft Green
-          (question.awardedMarks ?: 0.0) > 0.0 -> Color(0xFFDBEAFE) // Soft Blue
-          else -> MaterialTheme.colorScheme.surfaceVariant
+          isFullMarks -> StatusSuccessContainer
+          (question.awardedMarks ?: 0.0) > 0.0 -> LightBlueHighlight
+          else -> Color(0xFFF1F5F9)
         }
         val marksTextColor = when {
-          isFullMarks -> Color(0xFF166534)
-          (question.awardedMarks ?: 0.0) > 0.0 -> Color(0xFF1E40AF)
-          else -> MaterialTheme.colorScheme.onSurfaceVariant
+          isFullMarks -> StatusSuccess
+          (question.awardedMarks ?: 0.0) > 0.0 -> RoyalBlue
+          else -> TextSecondary
         }
 
         Surface(
@@ -406,10 +395,10 @@ private fun ResultQuestionCard(
 
       // Review Reason banner if flagged
       if (question.reviewRequired && !question.reviewReason.isNullOrBlank()) {
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         Surface(
           shape = RoundedCornerShape(6.dp),
-          color = TertiaryAmberContainer.copy(alpha = 0.5f),
+          color = TertiaryAmberContainer,
           modifier = Modifier.fillMaxWidth(),
         ) {
           Row(
@@ -440,11 +429,11 @@ private fun ResultQuestionCard(
         text = question.questionText ?: "Question text not detected",
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = TextPrimary,
       )
 
       Spacer(modifier = Modifier.height(10.dp))
-      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+      HorizontalDivider(color = BorderGray, thickness = 1.dp)
       Spacer(modifier = Modifier.height(10.dp))
 
       // Student Answer
@@ -455,26 +444,27 @@ private fun ResultQuestionCard(
         Icon(
           imageVector = Icons.Default.Edit,
           contentDescription = null,
-          tint = MaterialTheme.colorScheme.primary,
+          tint = RoyalBlue,
           modifier = Modifier.size(14.dp),
         )
         Text(
           text = "Student Answer:",
           style = MaterialTheme.typography.labelMedium,
           fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.primary,
+          color = RoyalBlue,
         )
       }
       Spacer(modifier = Modifier.height(4.dp))
       Surface(
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        color = Color(0xFFF8FAFC),
+        border = BorderStroke(1.dp, BorderGray),
         modifier = Modifier.fillMaxWidth(),
       ) {
         Text(
           text = if (question.studentAnswer.isNullOrBlank()) "No answer recorded" else question.studentAnswer,
           style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = TextPrimary,
           modifier = Modifier.padding(10.dp),
         )
       }
@@ -489,26 +479,27 @@ private fun ResultQuestionCard(
         Icon(
           imageVector = Icons.Default.CheckCircle,
           contentDescription = null,
-          tint = Color(0xFF166534),
+          tint = StatusSuccess,
           modifier = Modifier.size(14.dp),
         )
         Text(
           text = "Expected Answer:",
           style = MaterialTheme.typography.labelMedium,
           fontWeight = FontWeight.Bold,
-          color = Color(0xFF166534),
+          color = StatusSuccess,
         )
       }
       Spacer(modifier = Modifier.height(4.dp))
       Surface(
         shape = RoundedCornerShape(8.dp),
-        color = Color(0xFFDCFCE7).copy(alpha = 0.3f),
+        color = StatusSuccessContainer.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, StatusSuccess.copy(alpha = 0.2f)),
         modifier = Modifier.fillMaxWidth(),
       ) {
         Text(
           text = if (question.expectedAnswer.isNullOrBlank()) "N/A" else question.expectedAnswer,
           style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurface,
+          color = TextPrimary,
           modifier = Modifier.padding(10.dp),
         )
       }
@@ -523,26 +514,26 @@ private fun ResultQuestionCard(
           Icon(
             imageVector = Icons.Default.Feedback,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.secondary,
+            tint = RoyalBlue,
             modifier = Modifier.size(14.dp),
           )
           Text(
             text = "AI Feedback:",
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.secondary,
+            color = RoyalBlue,
           )
         }
         Spacer(modifier = Modifier.height(4.dp))
         Surface(
           shape = RoundedCornerShape(8.dp),
-          color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+          color = LightBlueHighlight,
           modifier = Modifier.fillMaxWidth(),
         ) {
           Text(
             text = question.feedback,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = TextPrimary,
             modifier = Modifier.padding(10.dp),
           )
         }

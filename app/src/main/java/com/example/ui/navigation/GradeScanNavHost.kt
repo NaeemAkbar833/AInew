@@ -1,5 +1,9 @@
 package com.example.ui.navigation
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -11,6 +15,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.data.repository.AuthRepository
@@ -29,6 +34,7 @@ import com.example.ui.auth.AuthViewModel
 import com.example.ui.auth.LoginScreen
 import com.example.ui.auth.SignUpScreen
 import com.example.ui.classes.ClassViewModel
+import com.example.ui.classes.ClassesScreen
 import com.example.ui.exam.CreateExamDialog
 import com.example.ui.exam.ExamDetailScreen
 import com.example.ui.exam.ExamViewModel
@@ -62,293 +68,358 @@ fun GradeScanNavHost(
   paperRepository: PaperRepository = remember { SupabasePaperRepository(authRepository) },
   ocrRepository: OcrRepository = remember { SupabaseOcrRepository(authRepository) },
 ) {
-  NavHost(
-    navController = navController,
-    startDestination = Screen.Splash.route,
+  val navBackStackEntry by navController.currentBackStackEntryAsState()
+  val currentRoute = navBackStackEntry?.destination?.route
+
+  // Genuine top-level destinations supported by the bottom navigation bar
+  val bottomBarRoutes = remember {
+    setOf(
+      Screen.Home.route,
+      Screen.Exams.route,
+      Screen.Classes.route,
+      Screen.Results.route,
+    )
+  }
+  val showBottomBar = currentRoute in bottomBarRoutes
+
+  Scaffold(
     modifier = modifier,
-  ) {
-    composable(Screen.Splash.route) {
-      SplashScreen(
-        authRepository = authRepository,
-        onNavigateToHome = {
-          navController.navigate(Screen.Home.route) {
-            popUpTo(Screen.Splash.route) { inclusive = true }
-          }
-        },
-        onNavigateToLogin = {
-          navController.navigate(Screen.Login.route) {
-            popUpTo(Screen.Splash.route) { inclusive = true }
-          }
-        },
-      )
-    }
-
-    composable(Screen.Login.route) {
-      val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
-      LoginScreen(
-        viewModel = authViewModel,
-        onNavigateToSignUp = {
-          authViewModel.clearError()
-          navController.navigate(Screen.SignUp.route)
-        },
-        onLoginSuccess = {
-          authViewModel.resetSuccess()
-          navController.navigate(Screen.Home.route) {
-            popUpTo(Screen.Login.route) { inclusive = true }
-          }
-        },
-      )
-    }
-
-    composable(Screen.SignUp.route) {
-      val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
-      SignUpScreen(
-        viewModel = authViewModel,
-        onNavigateBack = {
-          authViewModel.clearError()
-          navController.popBackStack()
-        },
-        onSignUpSuccess = {
-          authViewModel.resetSuccess()
-          navController.navigate(Screen.Home.route) {
-            popUpTo(Screen.Login.route) { inclusive = true }
-          }
-        },
-      )
-    }
-
-    composable(Screen.Home.route) {
-      val homeViewModel: HomeViewModel = viewModel { HomeViewModel(authRepository) }
-      var isHomeCreateExamDialogOpen by remember { mutableStateOf(false) }
-
-      HomeScreen(
-        viewModel = homeViewModel,
-        onSignedOut = {
-          navController.navigate(Screen.Login.route) {
-            popUpTo(Screen.Home.route) { inclusive = true }
-          }
-        },
-        onNavigateToExams = {
-          navController.navigate(Screen.Exams.route)
-        },
-        onNavigateToResults = {
-          navController.navigate(Screen.Results.route)
-        },
-        onOpenCreateExam = {
-          isHomeCreateExamDialogOpen = true
-        },
-      )
-
-      if (isHomeCreateExamDialogOpen) {
-        val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
-        CreateExamDialog(
-          onDismissRequest = { isHomeCreateExamDialogOpen = false },
-          onExamCreated = { newExam ->
-            isHomeCreateExamDialogOpen = false
-            navController.navigate(Screen.Exams.route)
+    contentWindowInsets = WindowInsets(0, 0, 0, 0),
+    bottomBar = {
+      if (showBottomBar) {
+        GradeScanBottomNavigationBar(
+          currentRoute = currentRoute,
+          onNavigateToDestination = { targetRoute ->
+            if (currentRoute != targetRoute) {
+              navController.navigate(targetRoute) {
+                popUpTo(Screen.Home.route) {
+                  saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+              }
+            }
           },
-          viewModel = examViewModel,
         )
       }
-    }
-
-    composable(Screen.Exams.route) {
-      val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
-      ExamsScreen(
-        viewModel = examViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-        onExamClick = { examId ->
-          navController.navigate(Screen.ExamDetail.createRoute(examId))
-        },
-      )
-    }
-
-    composable(Screen.Results.route) {
-      val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
-      ResultsScreen(
-        viewModel = examViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-        onExamClick = { examId ->
-          navController.navigate(Screen.ExamClassesResults.createRoute(examId))
-        },
-      )
-    }
-
-    composable(
-      route = Screen.ExamClassesResults.route,
-      arguments = listOf(navArgument("examId") { type = NavType.StringType }),
-    ) { backStackEntry ->
-      val examId = backStackEntry.arguments?.getString("examId") ?: ""
-      val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
-      val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
-      ExamClassesResultsScreen(
-        examId = examId,
-        examViewModel = examViewModel,
-        classViewModel = classViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-        onClassClick = { classId ->
-          navController.navigate(Screen.ClassResults.createRoute(classId))
-        },
-      )
-    }
-
-    composable(
-      route = Screen.ClassResults.route,
-      arguments = listOf(navArgument("classId") { type = NavType.StringType }),
-    ) { backStackEntry ->
-      val classId = backStackEntry.arguments?.getString("classId") ?: ""
-      val classResultsViewModel: ClassResultsViewModel = viewModel {
-        ClassResultsViewModel(classRepository, studentRepository)
-      }
-      ClassResultsScreen(
-        classId = classId,
-        viewModel = classResultsViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-        onStudentClick = { studentId ->
-          navController.navigate(Screen.StudentResultDetail.createRoute(studentId, classId))
-        },
-        onClassReportClick = {
-          navController.navigate(Screen.ClassReport.createRoute(classId))
-        },
-      )
-    }
-
-    composable(
-      route = Screen.ClassReport.route,
-      arguments = listOf(navArgument("classId") { type = NavType.StringType }),
-    ) { backStackEntry ->
-      val classId = backStackEntry.arguments?.getString("classId") ?: ""
-      val classReportViewModel: ClassReportViewModel = viewModel {
-        ClassReportViewModel(classRepository, examRepository, studentRepository)
-      }
-      ClassReportScreen(
-        classId = classId,
-        viewModel = classReportViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-      )
-    }
-
-    composable(
-      route = Screen.StudentResultDetail.route,
-      arguments = listOf(
-        navArgument("studentId") { type = NavType.StringType },
-        navArgument("classId") { type = NavType.StringType },
-      ),
-    ) { backStackEntry ->
-      val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
-      val classId = backStackEntry.arguments?.getString("classId") ?: ""
-      val studentResultDetailViewModel: StudentResultDetailViewModel = viewModel {
-        StudentResultDetailViewModel(studentRepository, classRepository)
-      }
-      StudentResultDetailScreen(
-        studentId = studentId,
-        classId = classId,
-        viewModel = studentResultDetailViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-      )
-    }
-
-    composable(
-      route = Screen.ExamDetail.route,
-      arguments = listOf(navArgument("examId") { type = NavType.StringType }),
-    ) { backStackEntry ->
-      val examId = backStackEntry.arguments?.getString("examId") ?: ""
-      val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
-      val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
-      ExamDetailScreen(
-        examId = examId,
-        examViewModel = examViewModel,
-        classViewModel = classViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-        onClassClick = { classId ->
-          navController.navigate(Screen.ClassDetail.createRoute(classId))
-        },
-      )
-    }
-
-    composable(
-      route = Screen.ClassDetail.route,
-      arguments = listOf(navArgument("classId") { type = NavType.StringType }),
-    ) { backStackEntry ->
-      val classId = backStackEntry.arguments?.getString("classId") ?: ""
-      val studentViewModel: StudentViewModel = viewModel { StudentViewModel(studentRepository, classRepository) }
-      ClassDetailScreen(
-        classId = classId,
-        viewModel = studentViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-        onStudentClick = { studentId ->
-          navController.navigate(Screen.StudentDetail.createRoute(studentId))
-        },
-      )
-    }
-
-    composable(
-      route = Screen.StudentDetail.route,
-      arguments = listOf(navArgument("studentId") { type = NavType.StringType }),
-    ) { backStackEntry ->
-      val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
-      val studentDetailViewModel: StudentDetailViewModel = viewModel {
-        StudentDetailViewModel(studentRepository, classRepository, paperRepository, ocrRepository)
+    },
+  ) { scaffoldPadding ->
+    NavHost(
+      navController = navController,
+      startDestination = Screen.Splash.route,
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(bottom = scaffoldPadding.calculateBottomPadding()),
+    ) {
+      composable(Screen.Splash.route) {
+        SplashScreen(
+          authRepository = authRepository,
+          onNavigateToHome = {
+            navController.navigate(Screen.Home.route) {
+              popUpTo(Screen.Splash.route) { inclusive = true }
+            }
+          },
+          onNavigateToLogin = {
+            navController.navigate(Screen.Login.route) {
+              popUpTo(Screen.Splash.route) { inclusive = true }
+            }
+          },
+        )
       }
 
-      StudentDetailScreen(
-        studentId = studentId,
-        viewModel = studentDetailViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-        onNavigateToScan = { sid, cid ->
-          navController.navigate(Screen.ScanPaper.createRoute(sid, cid))
-        },
-      )
-    }
+      composable(Screen.Login.route) {
+        val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
+        LoginScreen(
+          viewModel = authViewModel,
+          onNavigateToSignUp = {
+            authViewModel.clearError()
+            navController.navigate(Screen.SignUp.route)
+          },
+          onLoginSuccess = {
+            authViewModel.resetSuccess()
+            navController.navigate(Screen.Home.route) {
+              popUpTo(Screen.Login.route) { inclusive = true }
+            }
+          },
+        )
+      }
 
-    composable(
-      route = Screen.ScanPaper.route,
-      arguments = listOf(
-        navArgument("studentId") { type = NavType.StringType },
-        navArgument("classId") { type = NavType.StringType },
-      ),
-    ) { backStackEntry ->
-      val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
-      val classId = backStackEntry.arguments?.getString("classId") ?: ""
-      val scanPaperViewModel: ScanPaperViewModel = viewModel { ScanPaperViewModel(paperRepository) }
+      composable(Screen.SignUp.route) {
+        val authViewModel: AuthViewModel = viewModel { AuthViewModel(authRepository) }
+        SignUpScreen(
+          viewModel = authViewModel,
+          onNavigateBack = {
+            authViewModel.clearError()
+            navController.popBackStack()
+          },
+          onSignUpSuccess = {
+            authViewModel.resetSuccess()
+            navController.navigate(Screen.Home.route) {
+              popUpTo(Screen.Login.route) { inclusive = true }
+            }
+          },
+        )
+      }
 
-      // Access the StudentDetailViewModel from the previous backstack entry (StudentDetail route)
-      // This must be called in a @Composable context.
-      val previousEntry = remember(backStackEntry) { navController.previousBackStackEntry }
-      val studentDetailViewModel: StudentDetailViewModel? = previousEntry?.let { viewModel(it) }
+      composable(Screen.Home.route) {
+        val homeViewModel: HomeViewModel = viewModel { HomeViewModel(authRepository) }
+        var isHomeCreateExamDialogOpen by remember { mutableStateOf(false) }
 
-      ScanPaperScreen(
-        studentId = studentId,
-        classId = classId,
-        viewModel = scanPaperViewModel,
-        onNavigateBack = {
-          navController.popBackStack()
-        },
-        onScanFinished = { paperId ->
-          studentDetailViewModel?.let { vm ->
-            vm.loadStudentAndPapers(studentId)
-          }
-          navController.popBackStack()
-        },
-      )
+        HomeScreen(
+          viewModel = homeViewModel,
+          onSignedOut = {
+            navController.navigate(Screen.Login.route) {
+              popUpTo(Screen.Home.route) { inclusive = true }
+            }
+          },
+          onNavigateToExams = {
+            navController.navigate(Screen.Exams.route) {
+              popUpTo(Screen.Home.route) { saveState = true }
+              launchSingleTop = true
+              restoreState = true
+            }
+          },
+          onNavigateToClasses = {
+            navController.navigate(Screen.Classes.route) {
+              popUpTo(Screen.Home.route) { saveState = true }
+              launchSingleTop = true
+              restoreState = true
+            }
+          },
+          onNavigateToResults = {
+            navController.navigate(Screen.Results.route) {
+              popUpTo(Screen.Home.route) { saveState = true }
+              launchSingleTop = true
+              restoreState = true
+            }
+          },
+          onOpenCreateExam = {
+            isHomeCreateExamDialogOpen = true
+          },
+        )
+
+        if (isHomeCreateExamDialogOpen) {
+          val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+          CreateExamDialog(
+            onDismissRequest = { isHomeCreateExamDialogOpen = false },
+            onExamCreated = { newExam ->
+              isHomeCreateExamDialogOpen = false
+              navController.navigate(Screen.Exams.route)
+            },
+            viewModel = examViewModel,
+          )
+        }
+      }
+
+      composable(Screen.Exams.route) {
+        val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+        ExamsScreen(
+          viewModel = examViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onExamClick = { examId ->
+            navController.navigate(Screen.ExamDetail.createRoute(examId))
+          },
+        )
+      }
+
+      composable(Screen.Classes.route) {
+        val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+        ClassesScreen(
+          viewModel = examViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onExamClick = { examId ->
+            navController.navigate(Screen.ExamDetail.createRoute(examId))
+          },
+        )
+      }
+
+      composable(Screen.Results.route) {
+        val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+        ResultsScreen(
+          viewModel = examViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onExamClick = { examId ->
+            navController.navigate(Screen.ExamClassesResults.createRoute(examId))
+          },
+        )
+      }
+
+      composable(
+        route = Screen.ExamClassesResults.route,
+        arguments = listOf(navArgument("examId") { type = NavType.StringType }),
+      ) { backStackEntry ->
+        val examId = backStackEntry.arguments?.getString("examId") ?: ""
+        val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+        val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
+        ExamClassesResultsScreen(
+          examId = examId,
+          examViewModel = examViewModel,
+          classViewModel = classViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onClassClick = { classId ->
+            navController.navigate(Screen.ClassResults.createRoute(classId))
+          },
+        )
+      }
+
+      composable(
+        route = Screen.ClassResults.route,
+        arguments = listOf(navArgument("classId") { type = NavType.StringType }),
+      ) { backStackEntry ->
+        val classId = backStackEntry.arguments?.getString("classId") ?: ""
+        val classResultsViewModel: ClassResultsViewModel = viewModel {
+          ClassResultsViewModel(classRepository, studentRepository)
+        }
+        ClassResultsScreen(
+          classId = classId,
+          viewModel = classResultsViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onStudentClick = { studentId ->
+            navController.navigate(Screen.StudentResultDetail.createRoute(studentId, classId))
+          },
+          onClassReportClick = {
+            navController.navigate(Screen.ClassReport.createRoute(classId))
+          },
+        )
+      }
+
+      composable(
+        route = Screen.ClassReport.route,
+        arguments = listOf(navArgument("classId") { type = NavType.StringType }),
+      ) { backStackEntry ->
+        val classId = backStackEntry.arguments?.getString("classId") ?: ""
+        val classReportViewModel: ClassReportViewModel = viewModel {
+          ClassReportViewModel(classRepository, examRepository, studentRepository)
+        }
+        ClassReportScreen(
+          classId = classId,
+          viewModel = classReportViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+        )
+      }
+
+      composable(
+        route = Screen.StudentResultDetail.route,
+        arguments = listOf(
+          navArgument("studentId") { type = NavType.StringType },
+          navArgument("classId") { type = NavType.StringType },
+        ),
+      ) { backStackEntry ->
+        val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
+        val classId = backStackEntry.arguments?.getString("classId") ?: ""
+        val studentResultDetailViewModel: StudentResultDetailViewModel = viewModel {
+          StudentResultDetailViewModel(studentRepository, classRepository)
+        }
+        StudentResultDetailScreen(
+          studentId = studentId,
+          classId = classId,
+          viewModel = studentResultDetailViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+        )
+      }
+
+      composable(
+        route = Screen.ExamDetail.route,
+        arguments = listOf(navArgument("examId") { type = NavType.StringType }),
+      ) { backStackEntry ->
+        val examId = backStackEntry.arguments?.getString("examId") ?: ""
+        val examViewModel: ExamViewModel = viewModel { ExamViewModel(examRepository) }
+        val classViewModel: ClassViewModel = viewModel { ClassViewModel(classRepository) }
+        ExamDetailScreen(
+          examId = examId,
+          examViewModel = examViewModel,
+          classViewModel = classViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onClassClick = { classId ->
+            navController.navigate(Screen.ClassDetail.createRoute(classId))
+          },
+        )
+      }
+
+      composable(
+        route = Screen.ClassDetail.route,
+        arguments = listOf(navArgument("classId") { type = NavType.StringType }),
+      ) { backStackEntry ->
+        val classId = backStackEntry.arguments?.getString("classId") ?: ""
+        val studentViewModel: StudentViewModel = viewModel { StudentViewModel(studentRepository, classRepository) }
+        ClassDetailScreen(
+          classId = classId,
+          viewModel = studentViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onStudentClick = { studentId ->
+            navController.navigate(Screen.StudentDetail.createRoute(studentId))
+          },
+        )
+      }
+
+      composable(
+        route = Screen.StudentDetail.route,
+        arguments = listOf(navArgument("studentId") { type = NavType.StringType }),
+      ) { backStackEntry ->
+        val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
+        val studentDetailViewModel: StudentDetailViewModel = viewModel {
+          StudentDetailViewModel(studentRepository, classRepository, paperRepository, ocrRepository)
+        }
+
+        StudentDetailScreen(
+          studentId = studentId,
+          viewModel = studentDetailViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onNavigateToScan = { sid, cid ->
+            navController.navigate(Screen.ScanPaper.createRoute(sid, cid))
+          },
+        )
+      }
+
+      composable(
+        route = Screen.ScanPaper.route,
+        arguments = listOf(
+          navArgument("studentId") { type = NavType.StringType },
+          navArgument("classId") { type = NavType.StringType },
+        ),
+      ) { backStackEntry ->
+        val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
+        val classId = backStackEntry.arguments?.getString("classId") ?: ""
+        val scanPaperViewModel: ScanPaperViewModel = viewModel { ScanPaperViewModel(paperRepository) }
+
+        val previousEntry = remember(backStackEntry) { navController.previousBackStackEntry }
+        val studentDetailViewModel: StudentDetailViewModel? = previousEntry?.let { viewModel(it) }
+
+        ScanPaperScreen(
+          studentId = studentId,
+          classId = classId,
+          viewModel = scanPaperViewModel,
+          onNavigateBack = {
+            navController.popBackStack()
+          },
+          onScanFinished = { paperId ->
+            studentDetailViewModel?.let { vm ->
+              vm.loadStudentAndPapers(studentId)
+            }
+            navController.popBackStack()
+          },
+        )
+      }
     }
   }
 }

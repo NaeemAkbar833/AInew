@@ -58,6 +58,10 @@ data class StudentDetailUiState(
   val isApproving: Boolean = false,
   val approvalSuccess: Boolean = false,
   val approvalError: String? = null,
+  val isSavingCorrections: Boolean = false,
+  val saveCorrectionsSuccess: Boolean = false,
+  val saveCorrectionsError: String? = null,
+  val editedQuestions: List<EvaluationQuestion>? = null,
 )
 
 class StudentDetailViewModel(
@@ -519,6 +523,10 @@ class StudentDetailViewModel(
               feedbackMessage = "Result approved and saved successfully.",
             )
           }
+          // Refresh papers list to update the "status" on the paper cards (e.g. from 'scanned' to 'approved')
+          _uiState.value.student?.id?.let { sid ->
+            loadStudentAndPapers(sid)
+          }
         },
         onFailure = { error ->
           val rawMessage = error.localizedMessage ?: error.message.orEmpty()
@@ -584,6 +592,126 @@ class StudentDetailViewModel(
         isApproving = false,
         approvalSuccess = false,
         approvalError = null,
+        isSavingCorrections = false,
+        saveCorrectionsSuccess = false,
+        saveCorrectionsError = null,
+        editedQuestions = null,
+      )
+    }
+  }
+
+  fun onUpdateQuestion(questionId: String?, questionNumber: String?, awardedMarks: Double?, feedback: String) {
+    _uiState.update { state ->
+      val currentQuestions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions ?: return@update state
+      val updatedQuestions = currentQuestions.map { q ->
+        val isTarget = if (q.id != null && questionId != null) {
+          q.id == questionId
+        } else {
+          // Fallback for unsaved questions if ID is null: match by question number
+          q.questionNumber != null && q.questionNumber == questionNumber
+        }
+
+        if (isTarget) {
+          q.copy(awardedMarks = awardedMarks, feedback = feedback)
+        } else {
+          q
+        }
+      }
+      state.copy(editedQuestions = updatedQuestions, saveCorrectionsSuccess = false)
+    }
+  }
+
+  fun saveTeacherCorrections(evaluationId: String, paperId: String) {
+    val state = _uiState.value
+    val questions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions ?: return
+    val studentId = state.student?.id ?: return
+    val classId = state.classRoom?.id ?: return
+    val teacherId = state.evaluationResult?.evaluation?.teacherId ?: return
+
+    viewModelScope.launch {
+      _uiState.update { it.copy(isSavingCorrections = true, saveCorrectionsError = null) }
+
+      val result = withContext(Dispatchers.IO) {
+        try {
+          if (!SupabaseClientProvider.isConfigured()) {
+            return@withContext Result.failure<AiEvaluationResponse>(
+              IllegalStateException("Supabase is not configured yet.")
+            )
+          }
+
+          // Calculate totals
+          val totalMarksObtained = questions.sumOf { it.awardedMarks ?: 0.0 }
+          val totalPossibleMarks = state.classRoom?.totalMarks?.toDouble() ?: questions.sumOf { it.maximumMarks ?: 0.0 }
+          val percentage = if (totalPossibleMarks > 0.0) {
+            Math.round((totalMarksObtained / totalPossibleMarks) * 10000) / 100.0
+          } else null
+
+          val questionsJson = questions.map { q ->
+            buildJsonObject {
+              put("question_number", q.questionNumber)
+              put("question_text", q.questionText)
+              put("maximum_marks", q.maximumMarks)
+              put("student_answer", q.studentAnswer)
+              put("expected_answer", q.expectedAnswer)
+              put("marking_criteria", q.markingCriteria)
+              put("awarded_marks", q.awardedMarks)
+              put("feedback", q.feedback)
+              put("review_required", q.reviewRequired)
+              put("review_reason", q.reviewReason)
+            }
+          }
+
+          val params = buildJsonObject {
+            put("p_paper_id", paperId)
+            put("p_student_id", studentId)
+            put("p_class_id", classId)
+            put("p_teacher_id", teacherId)
+            put("p_status", "needs_review") // Keep as needs_review until approved
+            put("p_total_marks_obtained", totalMarksObtained)
+            put("p_total_marks", totalPossibleMarks)
+            put("p_percentage", percentage)
+            put("p_review_required", true)
+            put("p_review_reason", "Teacher corrected")
+            put("p_questions", kotlinx.serialization.json.JsonArray(questionsJson))
+          }
+
+          val response = SupabaseClientProvider.client.postgrest.rpc(
+            function = "save_provisional_paper_evaluation",
+            parameters = params,
+          )
+
+          val updatedEval = parseAiEvaluationResponse(response.data, fallbackPaperId = paperId)
+          if (updatedEval != null) {
+            Result.success(updatedEval)
+          } else {
+            Result.failure(Exception("Failed to parse updated evaluation."))
+          }
+        } catch (e: Exception) {
+          Log.e("StudentDetailViewModel", "Error saving teacher corrections", e)
+          Result.failure(e)
+        }
+      }
+
+      result.fold(
+        onSuccess = { updatedResponse ->
+          _uiState.update {
+            it.copy(
+              isSavingCorrections = false,
+              saveCorrectionsSuccess = true,
+              evaluationResult = updatedResponse,
+              editedQuestions = null,
+              feedbackMessage = "Corrections saved successfully.",
+            )
+          }
+        },
+        onFailure = { error ->
+          _uiState.update {
+            it.copy(
+              isSavingCorrections = false,
+              saveCorrectionsError = error.localizedMessage ?: "Failed to save corrections.",
+            )
+          }
+        }
       )
     }
   }

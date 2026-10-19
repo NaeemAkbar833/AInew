@@ -1,7 +1,6 @@
 package com.example.ui.theme
 
 import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -12,7 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val LightColorScheme = lightColorScheme(
-  primary = PrimaryBlueLight,
+  primary = PrimaryBlue,
   onPrimary = Color.White,
   primaryContainer = PrimaryBlueContainer,
   onPrimaryContainer = OnPrimaryBlueContainer,
@@ -51,18 +50,12 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun GradeScanTheme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
-  dynamicColor: Boolean = false, // Keep consistent branding
+  darkTheme: Boolean = false, // Force consistent light theme matching reference screenshot
+  dynamicColor: Boolean = false, // Keep consistent branding across devices
   content: @Composable () -> Unit,
 ) {
-  val colorScheme = when {
-    dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-      val context = LocalContext.current
-      if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    }
-    darkTheme -> DarkColorScheme
-    else -> LightColorScheme
-  }
+  // Always use LightColorScheme to guarantee consistent light theme across all devices and system settings
+  val colorScheme = LightColorScheme
 
   MaterialTheme(
     colorScheme = colorScheme,
@@ -70,4 +63,3 @@ fun GradeScanTheme(
     content = content,
   )
 }
-

@@ -26,7 +26,15 @@ data class StudentPaper(
   val ocrError: String? = null,
   @SerialName("created_at")
   val createdAt: String? = null,
+  @SerialName("evaluation")
+  val evaluation: EvaluationStatus? = null,
   val pages: List<StudentPaperPage> = emptyList(),
+)
+
+@Serializable
+data class EvaluationStatus(
+  @SerialName("status")
+  val status: String
 )
 
 @Serializable

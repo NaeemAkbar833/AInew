@@ -1,556 +1,700 @@
 package com.example.ui.paper.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Assignment
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.automirrored.filled.Rule
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Feedback
-import androidx.compose.material.icons.filled.HelpOutline
-import androidx.compose.material.icons.filled.PendingActions
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Grade
+import androidx.compose.material.icons.filled.RateReview
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.unit.sp
 import com.example.data.model.AiEvaluationResponse
-import com.example.data.model.EvaluationDetail
 import com.example.data.model.EvaluationQuestion
-import com.example.data.model.parseAiEvaluationResponse
-import com.example.ui.theme.TertiaryAmber
+import com.example.ui.theme.BorderGray
+import com.example.ui.theme.DarkRoyalBlue
+import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.StatusAmber
+import com.example.ui.theme.StatusSuccess
+import com.example.ui.theme.StatusSuccessContainer
+import com.example.ui.theme.StatusWarning
+import com.example.ui.theme.StatusWarningContainer
 import com.example.ui.theme.TertiaryAmberContainer
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
+import java.util.Locale
 
+/**
+ * Interactive Teacher Review & Approval ModalBottomSheet harmonized with the
+ * GradeScan Royal Blue + White design system.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TeacherReviewDialog(
-  evaluationResponse: AiEvaluationResponse?,
-  rawJson: String?,
-  studentName: String,
-  className: String,
-  fallbackPaperId: String? = null,
+  evaluationResponse: AiEvaluationResponse,
+  editedQuestions: List<EvaluationQuestion>? = null,
+  studentName: String = "",
+  subjectName: String = "",
   isApproving: Boolean = false,
   approvalError: String? = null,
+  isSavingCorrections: Boolean = false,
+  saveCorrectionsSuccess: Boolean = false,
+  saveCorrectionsError: String? = null,
+  onUpdateQuestion: (questionId: String?, questionNumber: String?, awardedMarks: Double?, feedback: String) -> Unit,
+  onSaveCorrections: (evaluationId: String, paperId: String) -> Unit,
+  onApprove: (evaluationId: String, paperId: String) -> Unit,
   onDismiss: () -> Unit,
-  onCopyJson: () -> Unit,
-  onApprove: (evaluationId: String, paperId: String) -> Unit = { _, _ -> },
-  modifier: Modifier = Modifier,
 ) {
-  val effectiveResponse = remember(evaluationResponse, rawJson) {
-    if (evaluationResponse?.evaluation != null && evaluationResponse.evaluation.questions.isNotEmpty()) {
-      evaluationResponse
-    } else if (!rawJson.isNullOrBlank()) {
-      parseAiEvaluationResponse(rawJson, fallbackPaperId) ?: evaluationResponse
-    } else {
-      evaluationResponse
-    }
+  val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  val configuration = LocalConfiguration.current
+  val maxSheetHeight = (configuration.screenHeightDp * 0.84f).dp
+
+  val evaluation = evaluationResponse.evaluation
+  val questions = editedQuestions ?: evaluation?.questions.orEmpty()
+  val isApproved = evaluation?.status == "approved" || evaluationResponse.status == "approved"
+  val isReviewRequired = !isApproved && (
+    evaluation?.reviewRequired == true ||
+      evaluation?.status == "needs_review" ||
+      evaluationResponse.status == "needs_review"
+    )
+  val hasUnsavedEdits = editedQuestions != null && !isApproved
+  val isBusy = isApproving || isSavingCorrections
+
+  val liveTotalObtained = if (editedQuestions != null) {
+    editedQuestions.sumOf { it.awardedMarks ?: 0.0 }
+  } else {
+    evaluation?.totalMarksObtained ?: questions.sumOf { it.awardedMarks ?: 0.0 }
   }
+  val totalPossible = evaluation?.totalMarks ?: questions.sumOf { it.maximumMarks ?: 0.0 }
 
-  val evaluation = effectiveResponse?.evaluation
-  val overallStatus = effectiveResponse?.status ?: evaluation?.status
-  val isApproved = overallStatus == "approved" || evaluation?.status == "approved"
-  val evalId = evaluation?.id
-  val paperId = evaluation?.paperId ?: fallbackPaperId
-  val canApprove = !evalId.isNullOrBlank() && !paperId.isNullOrBlank() && !isApproved
+  val headerGradient = Brush.linearGradient(
+    colors = listOf(RoyalBlue, DarkRoyalBlue)
+  )
+  val primaryButtonGradient = Brush.horizontalGradient(
+    colors = listOf(RoyalBlue, DarkRoyalBlue)
+  )
 
-  Dialog(
-    onDismissRequest = onDismiss,
-    properties = DialogProperties(usePlatformDefaultWidth = false),
-  ) {
-    Surface(
-      shape = RoundedCornerShape(20.dp),
-      color = MaterialTheme.colorScheme.surface,
-      tonalElevation = 6.dp,
-      modifier = modifier
-        .fillMaxWidth(0.96f)
-        .fillMaxHeight(0.92f)
-        .testTag("teacher_review_dialog"),
-    ) {
+  ModalBottomSheet(
+    onDismissRequest = { if (!isBusy) onDismiss() },
+    sheetState = sheetState,
+    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    containerColor = Color.White,
+    scrimColor = Color.Black.copy(alpha = 0.45f),
+    tonalElevation = 0.dp,
+    contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+    dragHandle = {
       Column(
         modifier = Modifier
-          .fillMaxSize()
-          .padding(16.dp),
+          .fillMaxWidth()
+          .background(Color.White)
+          .padding(top = 10.dp, bottom = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
       ) {
-        // 1. Header Bar
-        TeacherReviewHeader(
-          evaluation = evaluation,
-          overallStatus = overallStatus,
-          studentName = studentName,
-          className = className,
-          onDismiss = onDismiss,
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // 2. Scrollable Content
-        Column(
+        Box(
           modifier = Modifier
-            .weight(1f)
-            .verticalScroll(rememberScrollState()),
+            .width(36.dp)
+            .height(4.dp)
+            .clip(CircleShape)
+            .background(BorderGray)
+        )
+      }
+    },
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .heightIn(max = maxSheetHeight)
+        .background(Color.White)
+        .navigationBarsPadding()
+        .imePadding()
+        .testTag("teacher_review_dialog"),
+    ) {
+      // 1. Compact Header
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
+          modifier = Modifier.weight(1f),
         ) {
-          if (evaluation != null) {
-            // A. Score & Percentage Summary Card
-            EvaluationSummaryCard(
-              evaluation = evaluation,
-              percentageAvailable = effectiveResponse?.percentageAvailable == true || evaluation.percentageAvailable,
+          Box(
+            modifier = Modifier
+              .size(40.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(headerGradient),
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(
+              imageVector = if (isApproved) Icons.Default.Verified else Icons.Default.RateReview,
+              contentDescription = null,
+              tint = Color.White,
+              modifier = Modifier.size(20.dp),
             )
+          }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // B. Overall Review Flag Banner (if required)
-            if (evaluation.reviewRequired || overallStatus == "needs_review") {
-              EvaluationReviewWarningBanner(
-                reviewReason = evaluation.reviewReason
-                  ?: "Some question marks, answer keys, or class total discrepancies require teacher review.",
-              )
-              Spacer(modifier = Modifier.height(14.dp))
-            }
-
-            // C. Question Breakdown Header
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-              ) {
-                Text(
-                  text = "Question Breakdown",
-                  style = MaterialTheme.typography.titleMedium,
-                  fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.onSurface,
-                )
-                Surface(
-                  shape = RoundedCornerShape(10.dp),
-                  color = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                  Text(
-                    text = "${evaluation.questions.size} Questions",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                  )
-                }
-              }
-            }
-
+          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-              text = "Review handwritten OCR, provisional criteria, and awarded marks.",
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+              text = if (isApproved) "Approved Evaluation Result" else "Review & Approve Evaluation",
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              color = TextPrimary,
+              letterSpacing = (-0.2).sp,
             )
-
-            // D. List of Questions
-            if (evaluation.questions.isEmpty()) {
-              Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(
-                  containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ),
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(vertical = 12.dp),
-              ) {
-                Box(
-                  contentAlignment = Alignment.Center,
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                ) {
-                  Text(
-                    text = "No questions found in this evaluation.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                  )
-                }
+            val contextSubtitle = buildString {
+              if (studentName.isNotBlank()) append(studentName)
+              if (subjectName.isNotBlank()) {
+                if (isNotEmpty()) append(" • ")
+                append(subjectName)
               }
-            } else {
-              Column(
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxWidth(),
-              ) {
-                evaluation.questions.forEachIndexed { index, question ->
-                  TeacherQuestionReviewCard(
-                    question = question,
-                    index = index + 1,
-                  )
-                }
-              }
+              if (isEmpty()) append("Inspect AI grading, edit marks, and approve")
             }
-          } else {
-            // Fallback: If evaluation failed to parse or is raw text
-            Card(
-              shape = RoundedCornerShape(12.dp),
-              colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-              ),
-              modifier = Modifier.fillMaxWidth(),
-            ) {
-              Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                  text = "Raw Evaluation Response",
-                  style = MaterialTheme.typography.titleSmall,
-                  fontWeight = FontWeight.Bold,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                SelectionContainer {
-                  Text(
-                    text = rawJson.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                  )
-                }
-              }
-            }
+            Text(
+              text = contextSubtitle,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Normal,
+              color = TextSecondary,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
           }
         }
 
-        // Optional Approval Error Alert Banner
-        if (!approvalError.isNullOrBlank()) {
-          Card(
-            shape = RoundedCornerShape(10.dp),
-            colors = CardDefaults.cardColors(
-              containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
-            ),
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(top = 8.dp)
-              .testTag("approval_error_banner"),
+        Box(
+          modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(LightBlueHighlight)
+            .border(1.dp, BorderGray, CircleShape)
+            .clickable(
+              enabled = !isBusy,
+              interactionSource = remember { MutableInteractionSource() },
+              indication = null,
+              onClick = onDismiss,
+            )
+            .testTag("teacher_review_close_button"),
+          contentAlignment = Alignment.Center,
+        ) {
+          Icon(
+            imageVector = Icons.Default.Close,
+            contentDescription = "Close",
+            tint = TextSecondary,
+            modifier = Modifier.size(16.dp),
+          )
+        }
+      }
+
+      HorizontalDivider(thickness = 1.dp, color = BorderGray)
+
+      // 2. Scrollable Review Content
+      Column(
+        modifier = Modifier
+          .weight(1f, fill = false)
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState())
+          .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        // Error Banner (Approval or Save Corrections Error)
+        val activeError = approvalError ?: saveCorrectionsError
+        if (!activeError.isNullOrBlank()) {
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = StatusWarningContainer,
+            border = BorderStroke(1.dp, StatusWarning.copy(alpha = 0.3f)),
           ) {
             Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(8.dp),
-              modifier = Modifier.padding(10.dp),
             ) {
               Icon(
                 imageVector = Icons.Default.ErrorOutline,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(16.dp),
+                tint = StatusWarning,
+                modifier = Modifier.size(18.dp),
               )
               Text(
-                text = approvalError,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                text = activeError,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = StatusWarning,
                 modifier = Modifier.weight(1f),
               )
             }
           }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // 3. Footer Action Bar
-        TeacherReviewFooter(
-          isApproved = isApproved,
-          isApproving = isApproving,
-          canApprove = canApprove,
-          onApprove = {
-            if (canApprove) {
-              onApprove(evalId!!, paperId!!)
+        // Save Corrections Success Banner
+        if (saveCorrectionsSuccess) {
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = StatusSuccessContainer,
+            border = BorderStroke(1.dp, StatusSuccess.copy(alpha = 0.3f)),
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = StatusSuccess,
+                modifier = Modifier.size(18.dp),
+              )
+              Text(
+                text = "Teacher adjustments saved. Click 'Approve & Finalize' when ready.",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = StatusSuccess,
+                modifier = Modifier.weight(1f),
+              )
             }
-          },
-          onCopyJson = onCopyJson,
-          onDismiss = onDismiss,
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun TeacherReviewHeader(
-  evaluation: EvaluationDetail?,
-  overallStatus: String?,
-  studentName: String,
-  className: String,
-  onDismiss: () -> Unit,
-) {
-  val isApproved = overallStatus == "approved" || evaluation?.status == "approved"
-  val isReviewRequired = evaluation?.reviewRequired == true || overallStatus == "needs_review"
-
-  Row(
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.SpaceBetween,
-    modifier = Modifier.fillMaxWidth(),
-  ) {
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      modifier = Modifier.weight(1f),
-    ) {
-      Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        modifier = Modifier.size(40.dp),
-      ) {
-        Box(contentAlignment = Alignment.Center) {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.Assignment,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp),
-          )
+          }
         }
-      }
 
-      Column {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        // Overall Score Summary Card
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("teacher_review_score_summary"),
+          shape = RoundedCornerShape(14.dp),
+          color = LightBlueHighlight,
+          border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.22f)),
         ) {
-          Text(
-            text = "Teacher Review",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.testTag("evaluation_review_title"),
-          )
+          Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              Column {
+                Text(
+                  text = if (isApproved) "Final Approved Score" else "Total Evaluation Score",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  color = TextSecondary,
+                )
+                Row(
+                  verticalAlignment = Alignment.Bottom,
+                  horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                  Text(
+                    text = formatMarks(liveTotalObtained),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = RoyalBlue,
+                  )
+                  Text(
+                    text = "/ ${formatMarks(totalPossible)}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(bottom = 3.dp),
+                  )
+                }
+              }
 
-          // Status Badge
-          if (isApproved) {
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = Color(0xFFDCFCE7),
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-              ) {
-                Icon(
-                  imageVector = Icons.Default.CheckCircle,
-                  contentDescription = null,
-                  tint = Color(0xFF166534),
-                  modifier = Modifier.size(12.dp),
-                )
-                Text(
+              // Status Badge
+              val (badgeBg, badgeFg, badgeIcon, badgeText) = when {
+                isApproved -> StatusPillSpec(
+                  bg = StatusSuccessContainer,
+                  fg = StatusSuccess,
+                  icon = Icons.Default.Verified,
                   text = "Approved",
-                  style = MaterialTheme.typography.labelSmall,
-                  fontWeight = FontWeight.Bold,
-                  color = Color(0xFF166534),
                 )
-              }
-            }
-          } else if (isReviewRequired) {
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = TertiaryAmberContainer,
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-              ) {
-                Icon(
-                  imageVector = Icons.Default.PendingActions,
-                  contentDescription = null,
-                  tint = TertiaryAmber,
-                  modifier = Modifier.size(12.dp),
-                )
-                Text(
+                isReviewRequired -> StatusPillSpec(
+                  bg = TertiaryAmberContainer,
+                  fg = StatusAmber,
+                  icon = Icons.Default.WarningAmber,
                   text = "Needs Review",
-                  style = MaterialTheme.typography.labelSmall,
-                  fontWeight = FontWeight.Bold,
-                  color = TertiaryAmber,
+                )
+                else -> StatusPillSpec(
+                  bg = Color.White,
+                  fg = RoyalBlue,
+                  icon = Icons.Default.CheckCircle,
+                  text = "AI Graded",
                 )
               }
-            }
-          } else {
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = MaterialTheme.colorScheme.primaryContainer,
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+
+              Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = badgeBg,
+                border = BorderStroke(1.dp, badgeFg.copy(alpha = 0.25f)),
               ) {
-                Icon(
-                  imageVector = Icons.Default.CheckCircle,
-                  contentDescription = null,
-                  tint = MaterialTheme.colorScheme.primary,
-                  modifier = Modifier.size(12.dp),
+                Row(
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                  Icon(
+                    imageVector = badgeIcon,
+                    contentDescription = null,
+                    tint = badgeFg,
+                    modifier = Modifier.size(14.dp),
+                  )
+                  Text(
+                    text = badgeText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = badgeFg,
+                  )
+                }
+              }
+            }
+
+            // Additional Metrics Row (Questions count, Extracted Marks, Percentage)
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              MetricChip(
+                label = "Questions",
+                value = "${questions.size}",
+                modifier = Modifier.weight(1f),
+              )
+              val extractedTotal = evaluation?.extractedQuestionTotalMarks
+              if (extractedTotal != null && extractedTotal > 0.0) {
+                MetricChip(
+                  label = "Extracted Max",
+                  value = formatMarks(extractedTotal),
+                  modifier = Modifier.weight(1f),
+                )
+              }
+              val pct = if (totalPossible > 0.0 && (evaluation?.percentageAvailable == true || editedQuestions != null)) {
+                String.format(Locale.US, "%.1f%%", (liveTotalObtained / totalPossible) * 100.0)
+              } else if (evaluation?.percentageAvailable == true && evaluation.percentage != null) {
+                String.format(Locale.US, "%.1f%%", evaluation.percentage)
+              } else {
+                "N/A"
+              }
+              MetricChip(
+                label = "Percentage",
+                value = pct,
+                modifier = Modifier.weight(1f),
+              )
+            }
+          }
+        }
+
+        // Review Required Banner
+        if (isReviewRequired && !evaluation?.reviewReason.isNullOrBlank()) {
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = TertiaryAmberContainer,
+            border = BorderStroke(1.dp, StatusAmber.copy(alpha = 0.35f)),
+          ) {
+            Row(
+              modifier = Modifier.padding(12.dp),
+              verticalAlignment = Alignment.Top,
+              horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+              Icon(
+                imageVector = Icons.Default.WarningAmber,
+                contentDescription = null,
+                tint = StatusAmber,
+                modifier = Modifier
+                  .padding(top = 1.dp)
+                  .size(18.dp),
+              )
+              Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                  text = "Teacher Review Recommended",
+                  fontSize = 12.5.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = StatusAmber,
                 )
                 Text(
-                  text = "AI Graded",
-                  style = MaterialTheme.typography.labelSmall,
-                  fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.onPrimaryContainer,
+                  text = evaluation?.reviewReason.orEmpty(),
+                  fontSize = 12.sp,
+                  color = TextPrimary,
+                  lineHeight = 17.sp,
                 )
               }
             }
           }
         }
 
-        Text(
-          text = "$studentName • $className",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-      }
-    }
-
-    IconButton(
-      onClick = onDismiss,
-      modifier = Modifier.testTag("close_teacher_review_header_button"),
-    ) {
-      Icon(imageVector = Icons.Default.Close, contentDescription = "Close review")
-    }
-  }
-}
-
-@Composable
-private fun EvaluationSummaryCard(
-  evaluation: EvaluationDetail,
-  percentageAvailable: Boolean,
-) {
-  Card(
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-    ),
-    modifier = Modifier
-      .fillMaxWidth()
-      .testTag("evaluation_score_summary_card"),
-  ) {
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(16.dp),
-    ) {
-      // Total Marks Column
-      Column(modifier = Modifier.weight(1f)) {
-        Text(
-          text = "TOTAL SCORE",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-          Text(
-            text = evaluation.displayTotalMarksObtained,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.primary,
-          )
-          Text(
-            text = " / ${evaluation.displayTotalMarks}",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 2.dp, start = 2.dp),
-          )
-        }
-
-        if (evaluation.extractedQuestionTotalMarks != null &&
-          evaluation.extractedQuestionTotalMarks != evaluation.totalMarks
+        // Question-by-Question Section Header
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
-          Spacer(modifier = Modifier.height(2.dp))
           Text(
-            text = "Extracted Questions Total: ${evaluation.displayExtractedTotalMarks} marks",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
+            text = "Question Breakdown (${questions.size})",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary,
           )
+          if (!isApproved) {
+            Text(
+              text = "Tap any question to adjust marks",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Medium,
+              color = RoyalBlue,
+            )
+          }
         }
-      }
 
-      // Percentage Column
-      Column(
-        horizontalAlignment = Alignment.End,
-        modifier = Modifier.weight(1f),
-      ) {
-        Text(
-          text = "PERCENTAGE",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-
-        if (percentageAvailable && evaluation.percentage != null) {
+        if (questions.isEmpty()) {
           Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, BorderGray),
           ) {
             Text(
-              text = "${evaluation.percentage}%",
-              style = MaterialTheme.typography.titleMedium,
-              fontWeight = FontWeight.Bold,
-              color = MaterialTheme.colorScheme.onPrimary,
-              modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+              text = "No individual question evaluations were returned for this paper.",
+              fontSize = 13.sp,
+              color = TextSecondary,
+              modifier = Modifier.padding(16.dp),
             )
           }
         } else {
-          Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = TertiaryAmberContainer,
+          questions.forEachIndexed { index, question ->
+            QuestionReviewCard(
+              index = index,
+              question = question,
+              isEditable = !isApproved && !isBusy,
+              onUpdate = { newMarks, newFeedback ->
+                onUpdateQuestion(
+                  question.id,
+                  question.questionNumber,
+                  newMarks,
+                  newFeedback,
+                )
+              },
+            )
+          }
+        }
+      }
+
+      // 3. Pinned Action Footer
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .background(Color.White),
+      ) {
+        HorizontalDivider(thickness = 1.dp, color = BorderGray)
+
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          // Optional Save Corrections row when teacher has edited questions
+          val evalId = evaluation?.id.orEmpty()
+          val paperId = evaluation?.paperId.orEmpty()
+
+          if (hasUnsavedEdits && evalId.isNotBlank() && paperId.isNotBlank()) {
+            OutlinedButton(
+              onClick = { onSaveCorrections(evalId, paperId) },
+              enabled = !isBusy,
+              shape = RoundedCornerShape(12.dp),
+              border = BorderStroke(1.dp, RoyalBlue),
+              colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = LightBlueHighlight,
+                contentColor = RoyalBlue,
+              ),
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .testTag("teacher_review_save_button"),
+            ) {
+              if (isSavingCorrections) {
+                CircularProgressIndicator(
+                  modifier = Modifier.size(16.dp),
+                  strokeWidth = 2.dp,
+                  color = RoyalBlue,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                  text = "Saving Corrections...",
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = RoyalBlue,
+                )
+              } else {
+                Icon(
+                  imageVector = Icons.Default.Save,
+                  contentDescription = null,
+                  tint = RoyalBlue,
+                  modifier = Modifier.size(16.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = "Save Edited Marks & Feedback",
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = RoyalBlue,
+                )
+              }
+            }
+          }
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
           ) {
-            Column(
-              horizontalAlignment = Alignment.CenterHorizontally,
-              modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            OutlinedButton(
+              onClick = onDismiss,
+              enabled = !isBusy,
+              shape = RoundedCornerShape(12.dp),
+              border = BorderStroke(1.dp, BorderGray),
+              colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = Color.White,
+                contentColor = TextPrimary,
+              ),
+              contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+              modifier = Modifier
+                .weight(1f)
+                .height(46.dp)
+                .testTag("teacher_review_cancel_button"),
             ) {
               Text(
-                text = "Pending Review",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = TertiaryAmber,
+                text = if (isApproved) "Close" else "Cancel",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
               )
-              Text(
-                text = "Requires confirmation",
-                style = MaterialTheme.typography.labelSmall,
-                color = TertiaryAmber.copy(alpha = 0.85f),
-              )
+            }
+
+            if (!isApproved && evalId.isNotBlank() && paperId.isNotBlank()) {
+              Button(
+                onClick = { onApprove(evalId, paperId) },
+                enabled = !isBusy,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = Color.Transparent,
+                  contentColor = Color.White,
+                  disabledContainerColor = BorderGray,
+                  disabledContentColor = TextSecondary,
+                ),
+                contentPadding = PaddingValues(0.dp),
+                modifier = Modifier
+                  .weight(1.45f)
+                  .height(46.dp)
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(
+                    brush = if (!isBusy) primaryButtonGradient
+                    else Brush.horizontalGradient(listOf(BorderGray, BorderGray))
+                  )
+                  .testTag("teacher_review_approve_button"),
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.Center,
+                  modifier = Modifier.padding(horizontal = 12.dp),
+                ) {
+                  if (isApproving) {
+                    CircularProgressIndicator(
+                      modifier = Modifier.size(16.dp),
+                      strokeWidth = 2.dp,
+                      color = Color.White,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                      text = "Approving...",
+                      fontSize = 14.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = Color.White,
+                    )
+                  } else {
+                    Icon(
+                      imageVector = Icons.Default.CheckCircle,
+                      contentDescription = null,
+                      tint = Color.White,
+                      modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = "Approve & Finalize",
+                      fontSize = 14.sp,
+                      fontWeight = FontWeight.SemiBold,
+                      color = Color.White,
+                    )
+                  }
+                }
+              }
             }
           }
         }
@@ -559,500 +703,473 @@ private fun EvaluationSummaryCard(
   }
 }
 
+private data class StatusPillSpec(
+  val bg: Color,
+  val fg: Color,
+  val icon: androidx.compose.ui.graphics.vector.ImageVector,
+  val text: String,
+)
+
 @Composable
-private fun EvaluationReviewWarningBanner(
-  reviewReason: String,
+private fun MetricChip(
+  label: String,
+  value: String,
+  modifier: Modifier = Modifier,
 ) {
-  Card(
-    shape = RoundedCornerShape(12.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = TertiaryAmberContainer.copy(alpha = 0.85f)
-    ),
-    modifier = Modifier
-      .fillMaxWidth()
-      .testTag("evaluation_review_warning_banner"),
+  Surface(
+    modifier = modifier,
+    shape = RoundedCornerShape(10.dp),
+    color = Color.White,
+    border = BorderStroke(1.dp, BorderGray),
   ) {
-    Row(
-      verticalAlignment = Alignment.Top,
-      horizontalArrangement = Arrangement.spacedBy(10.dp),
-      modifier = Modifier.padding(14.dp),
+    Column(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+      verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-      Icon(
-        imageVector = Icons.Default.WarningAmber,
-        contentDescription = "Review Warning",
-        tint = TertiaryAmber,
-        modifier = Modifier.size(20.dp),
+      Text(
+        text = label,
+        fontSize = 10.5.sp,
+        fontWeight = FontWeight.Medium,
+        color = TextSecondary,
       )
-      Column {
-        Text(
-          text = "Teacher Review Recommended",
-          style = MaterialTheme.typography.titleSmall,
-          fontWeight = FontWeight.Bold,
-          color = TertiaryAmber,
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-          text = reviewReason,
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurface,
-        )
-      }
+      Text(
+        text = value,
+        fontSize = 13.5.sp,
+        fontWeight = FontWeight.Bold,
+        color = TextPrimary,
+      )
     }
   }
 }
 
 @Composable
-private fun TeacherQuestionReviewCard(
-  question: EvaluationQuestion,
+private fun QuestionReviewCard(
   index: Int,
+  question: EvaluationQuestion,
+  isEditable: Boolean,
+  onUpdate: (awardedMarks: Double?, feedback: String) -> Unit,
 ) {
-  val qNum = question.questionNumber ?: "$index"
-  val isFullMarks = question.maximumMarks != null &&
-    question.maximumMarks > 0 &&
-    question.awardedMarks == question.maximumMarks
+  val qLabel = question.questionNumber ?: "${index + 1}"
+  val maxMarks = question.maximumMarks ?: 0.0
+  val awarded = question.awardedMarks ?: 0.0
 
-  Card(
-    shape = RoundedCornerShape(14.dp),
-    colors = CardDefaults.cardColors(
-      containerColor = MaterialTheme.colorScheme.surface
-    ),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-    border = androidx.compose.foundation.BorderStroke(
-      width = 1.dp,
-      color = if (question.reviewRequired) TertiaryAmber.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant,
-    ),
+  var isEditing by remember(question.id, qLabel) { mutableStateOf(false) }
+  var showReferenceDetails by remember(question.id, qLabel) { mutableStateOf(false) }
+  var marksInput by remember(question.awardedMarks) {
+    mutableStateOf(formatMarks(awarded))
+  }
+  var feedbackInput by remember(question.feedback) {
+    mutableStateOf(question.feedback.orEmpty())
+  }
+  var marksError by remember { mutableStateOf<String?>(null) }
+
+  LaunchedEffect(question.awardedMarks, question.feedback) {
+    marksInput = formatMarks(question.awardedMarks ?: 0.0)
+    feedbackInput = question.feedback.orEmpty()
+  }
+
+  Surface(
     modifier = Modifier
       .fillMaxWidth()
-      .testTag("evaluation_question_card_$qNum"),
+      .testTag("review_question_card_$qLabel"),
+    shape = RoundedCornerShape(14.dp),
+    color = Color.White,
+    border = BorderStroke(
+      width = 1.dp,
+      color = if (question.reviewRequired) StatusAmber.copy(alpha = 0.5f) else BorderGray,
+    ),
   ) {
     Column(
       modifier = Modifier
         .fillMaxWidth()
         .padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-      // Header: Question Number & Marks Pill
+      // Top Row: Q# Badge + Question Prompt + Score Pill
       Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
       ) {
         Row(
-          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.weight(1f),
           horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.Top,
         ) {
           Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = MaterialTheme.colorScheme.primaryContainer,
+            shape = RoundedCornerShape(8.dp),
+            color = RoyalBlue,
           ) {
             Text(
-              text = "Question $qNum",
-              style = MaterialTheme.typography.labelMedium,
+              text = "Q$qLabel",
+              fontSize = 12.sp,
               fontWeight = FontWeight.Bold,
-              color = MaterialTheme.colorScheme.onPrimaryContainer,
+              color = Color.White,
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             )
           }
 
-          if (question.reviewRequired) {
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = TertiaryAmberContainer,
-            ) {
-              Text(
-                text = "Review Flagged",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = TertiaryAmber,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-              )
-            }
+          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+              text = question.questionText?.ifBlank { "Question $qLabel" } ?: "Question $qLabel",
+              fontSize = 13.5.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = TextPrimary,
+              lineHeight = 18.sp,
+            )
           }
         }
 
-        // Marks Awarded Badge
-        val marksContainerColor = when {
-          isFullMarks -> Color(0xFFDCFCE7) // Soft Green
-          (question.awardedMarks ?: 0.0) > 0.0 -> Color(0xFFDBEAFE) // Soft Blue
-          else -> MaterialTheme.colorScheme.surfaceVariant
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Marks Badge
+        val scoreRatio = if (maxMarks > 0.0) awarded / maxMarks else 0.0
+        val scoreBg = when {
+          scoreRatio >= 0.7 -> StatusSuccessContainer
+          scoreRatio > 0.0 -> TertiaryAmberContainer
+          else -> StatusWarningContainer
         }
-        val marksTextColor = when {
-          isFullMarks -> Color(0xFF166534)
-          (question.awardedMarks ?: 0.0) > 0.0 -> Color(0xFF1E40AF)
-          else -> MaterialTheme.colorScheme.onSurfaceVariant
+        val scoreFg = when {
+          scoreRatio >= 0.7 -> StatusSuccess
+          scoreRatio > 0.0 -> StatusAmber
+          else -> StatusWarning
         }
 
         Surface(
           shape = RoundedCornerShape(8.dp),
-          color = marksContainerColor,
+          color = scoreBg,
+          border = BorderStroke(1.dp, scoreFg.copy(alpha = 0.25f)),
         ) {
           Text(
-            text = "${question.displayAwardedMarks} / ${question.displayMaxMarks} Marks",
-            style = MaterialTheme.typography.labelMedium,
+            text = "${formatMarks(awarded)} / ${formatMarks(maxMarks)}",
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
-            color = marksTextColor,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            color = scoreFg,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
           )
         }
       }
 
-      // Review Reason banner if flagged
-      if (question.reviewRequired && !question.reviewReason.isNullOrBlank()) {
-        Spacer(modifier = Modifier.height(8.dp))
+      // Question-level Review Warning if flagged
+      if (question.reviewRequired) {
         Surface(
-          shape = RoundedCornerShape(6.dp),
-          color = TertiaryAmberContainer.copy(alpha = 0.5f),
           modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(8.dp),
+          color = TertiaryAmberContainer,
+          border = BorderStroke(1.dp, StatusAmber.copy(alpha = 0.3f)),
         ) {
           Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.padding(8.dp),
           ) {
             Icon(
               imageVector = Icons.Default.WarningAmber,
               contentDescription = null,
-              tint = TertiaryAmber,
+              tint = StatusAmber,
               modifier = Modifier.size(14.dp),
             )
             Text(
-              text = question.reviewReason,
-              style = MaterialTheme.typography.labelSmall,
-              color = TertiaryAmber,
-              fontWeight = FontWeight.SemiBold,
+              text = question.reviewReason?.ifBlank { "Requires teacher verification" }
+                ?: "Requires teacher verification",
+              fontSize = 11.5.sp,
+              fontWeight = FontWeight.Medium,
+              color = StatusAmber,
             )
           }
         }
       }
 
-      Spacer(modifier = Modifier.height(10.dp))
-
-      // Question Text
-      Text(
-        text = question.questionText ?: "Question text not detected",
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface,
-      )
-
-      Spacer(modifier = Modifier.height(10.dp))
-      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-      Spacer(modifier = Modifier.height(10.dp))
-
-      // Student's Handwritten Answer
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-      ) {
-        Icon(
-          imageVector = Icons.Default.Edit,
-          contentDescription = null,
-          tint = MaterialTheme.colorScheme.primary,
-          modifier = Modifier.size(14.dp),
-        )
-        Text(
-          text = "Student's Answer (Handwriting OCR)",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.Bold,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-      }
-      Spacer(modifier = Modifier.height(4.dp))
+      // Student's Extracted Answer
       Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = LightBlueHighlight,
+        border = BorderStroke(1.dp, BorderGray),
       ) {
-        val studentAns = question.studentAnswer?.trim()
-        val isNoAns = studentAns.isNullOrEmpty() || studentAns == "[No answer detected]"
-        Text(
-          text = if (isNoAns) "[No answer detected]" else studentAns.orEmpty(),
-          style = MaterialTheme.typography.bodySmall,
-          fontStyle = if (isNoAns) FontStyle.Italic else FontStyle.Normal,
-          color = if (isNoAns) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+        Column(
           modifier = Modifier.padding(10.dp),
-        )
-      }
-
-      Spacer(modifier = Modifier.height(10.dp))
-
-      // Expected Answer & Source
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.MenuBook,
-            contentDescription = null,
-            tint = Color(0xFF0D9488),
-            modifier = Modifier.size(14.dp),
+          Text(
+            text = "Student Answer (OCR)",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = RoyalBlue,
           )
           Text(
-            text = "Expected Answer",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = question.studentAnswer?.ifBlank { "No answer text extracted." }
+              ?: "No answer text extracted.",
+            fontSize = 12.5.sp,
+            fontFamily = FontFamily.Monospace,
+            color = TextPrimary,
+            lineHeight = 17.sp,
           )
         }
-
-        // Source Chip
-        SourceIndicatorChip(source = question.expectedAnswerSource)
-      }
-      Spacer(modifier = Modifier.height(4.dp))
-      Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Text(
-          text = question.expectedAnswer ?: "No expected answer established.",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurface,
-          modifier = Modifier.padding(10.dp),
-        )
-      }
-
-      Spacer(modifier = Modifier.height(10.dp))
-
-      // Marking Criteria & Source
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-          Icon(
-            imageVector = Icons.AutoMirrored.Filled.Rule,
-            contentDescription = null,
-            tint = Color(0xFF6366F1),
-            modifier = Modifier.size(14.dp),
-          )
-          Text(
-            text = "Marking Criteria",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-
-        // Source Chip
-        SourceIndicatorChip(source = question.markingCriteriaSource)
-      }
-      Spacer(modifier = Modifier.height(4.dp))
-      Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
-        Text(
-          text = question.markingCriteria ?: "No marking criteria established.",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurface,
-          modifier = Modifier.padding(10.dp),
-        )
       }
 
       // Feedback
-      if (!question.feedback.isNullOrBlank()) {
-        Spacer(modifier = Modifier.height(10.dp))
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-          Icon(
-            imageVector = Icons.Default.Feedback,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(14.dp),
-          )
+      if (!question.feedback.isNullOrBlank() && !isEditing) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text(
-            text = "AI Feedback & Rationale",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
+            text = "Grading Feedback",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextSecondary,
           )
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Surface(
-          shape = RoundedCornerShape(8.dp),
-          color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-          modifier = Modifier.fillMaxWidth(),
-        ) {
           Text(
             text = question.feedback,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(10.dp),
+            fontSize = 12.5.sp,
+            color = TextPrimary,
+            lineHeight = 17.sp,
           )
         }
       }
-    }
-  }
-}
 
-@Composable
-private fun SourceIndicatorChip(source: String?) {
-  when (source) {
-    "question_paper" -> {
-      Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = Color(0xFFDCFCE7), // Soft Green
-      ) {
-        Text(
-          text = "From Question Paper",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.Bold,
-          color = Color(0xFF166534),
-          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-      }
-    }
-    "ai_generated" -> {
-      Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = Color(0xFFEDE9FE), // Soft Purple / Lavender
-      ) {
-        Text(
-          text = "AI Generated (Provisional)",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.Bold,
-          color = Color(0xFF6B21A8),
-          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-      }
-    }
-    else -> {
-      Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-      ) {
-        Text(
-          text = "Not Specified",
-          style = MaterialTheme.typography.labelSmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun TeacherReviewFooter(
-  isApproved: Boolean,
-  isApproving: Boolean,
-  canApprove: Boolean,
-  onApprove: () -> Unit,
-  onCopyJson: () -> Unit,
-  onDismiss: () -> Unit,
-) {
-  Column(
-    modifier = Modifier.fillMaxWidth(),
-  ) {
-    // Row 1: Copy JSON & Close secondary actions
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      modifier = Modifier.fillMaxWidth(),
-    ) {
-      OutlinedButton(
-        onClick = onCopyJson,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier
-          .weight(1f)
-          .testTag("copy_evaluation_json_button"),
-      ) {
-        Icon(
-          imageVector = Icons.Default.ContentCopy,
-          contentDescription = null,
-          modifier = Modifier.size(16.dp),
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("Copy JSON", maxLines = 1)
-      }
-
-      OutlinedButton(
-        onClick = onDismiss,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier
-          .weight(1f)
-          .testTag("close_teacher_review_dialog_button"),
-      ) {
-        Text("Close", maxLines = 1)
-      }
-    }
-
-    Spacer(modifier = Modifier.height(10.dp))
-
-    // Row 2: Full-width primary Approve & Save Result action / Approved badge
-    if (isApproved) {
-      Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = Color(0xFFDCFCE7),
-        border = BorderStroke(1.dp, Color(0xFF86EFAC)),
-        modifier = Modifier.fillMaxWidth(),
-      ) {
+      // Collapsible Expected Answer & Marking Criteria
+      if (!question.expectedAnswer.isNullOrBlank() || !question.markingCriteria.isNullOrBlank()) {
         Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.Center,
           modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp)
-            .testTag("evaluation_approved_badge"),
+            .clickable { showReferenceDetails = !showReferenceDetails }
+            .padding(vertical = 2.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
         ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Icon(
+              imageVector = Icons.Default.AutoAwesome,
+              contentDescription = null,
+              tint = RoyalBlue,
+              modifier = Modifier.size(14.dp),
+            )
+            Text(
+              text = if (showReferenceDetails) "Hide Expected Answer & Rubric" else "Show Expected Answer & Rubric",
+              fontSize = 11.5.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = RoyalBlue,
+            )
+          }
           Icon(
-            imageVector = Icons.Default.CheckCircle,
+            imageVector = if (showReferenceDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
             contentDescription = null,
-            tint = Color(0xFF166534),
-            modifier = Modifier.size(18.dp),
-          )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            text = "✓ Approved",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF166534),
-            maxLines = 1,
+            tint = RoyalBlue,
+            modifier = Modifier.size(16.dp),
           )
         }
+
+        AnimatedVisibility(visible = showReferenceDetails) {
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, BorderGray),
+          ) {
+            Column(
+              modifier = Modifier.padding(10.dp),
+              verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              if (!question.expectedAnswer.isNullOrBlank()) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                  Text(
+                    text = "Expected Answer",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = RoyalBlue,
+                  )
+                  Text(
+                    text = question.expectedAnswer,
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    lineHeight = 16.sp,
+                  )
+                }
+              }
+              if (!question.markingCriteria.isNullOrBlank()) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                  Text(
+                    text = "Marking Criteria",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = RoyalBlue,
+                  )
+                  Text(
+                    text = question.markingCriteria,
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    lineHeight = 16.sp,
+                  )
+                }
+              }
+            }
+          }
+        }
       }
-    } else {
-      Button(
-        onClick = onApprove,
-        enabled = !isApproving && canApprove,
-        shape = RoundedCornerShape(10.dp),
-        colors = ButtonDefaults.buttonColors(
-          containerColor = MaterialTheme.colorScheme.primary,
-        ),
-        modifier = Modifier
-          .fillMaxWidth()
-          .testTag("approve_evaluation_button"),
-      ) {
-        if (isApproving) {
-          CircularProgressIndicator(
-            color = MaterialTheme.colorScheme.onPrimary,
-            strokeWidth = 2.dp,
-            modifier = Modifier.size(18.dp),
-          )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text("Approving & Saving...", maxLines = 1)
+
+      // Edit Controls for Teacher Override
+      if (isEditable) {
+        if (!isEditing) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+          ) {
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = LightBlueHighlight,
+              border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.25f)),
+              modifier = Modifier
+                .clickable { isEditing = true }
+                .testTag("edit_question_$qLabel"),
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Edit,
+                  contentDescription = null,
+                  tint = RoyalBlue,
+                  modifier = Modifier.size(13.dp),
+                )
+                Text(
+                  text = "Edit Marks / Feedback",
+                  fontSize = 11.5.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = RoyalBlue,
+                )
+              }
+            }
+          }
         } else {
-          Icon(
-            imageVector = Icons.Default.CheckCircle,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-          )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text("Approve & Save Result", maxLines = 1)
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            color = LightBlueHighlight,
+            border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.25f)),
+          ) {
+            Column(
+              modifier = Modifier.padding(12.dp),
+              verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(
+                  text = "Override Marks & Feedback (Q$qLabel)",
+                  fontSize = 12.5.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary,
+                )
+                Text(
+                  text = "Done",
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = RoyalBlue,
+                  modifier = Modifier.clickable { isEditing = false },
+                )
+              }
+
+              OutlinedTextField(
+                value = marksInput,
+                onValueChange = { input ->
+                  marksInput = input
+                  val parsed = input.trim().toDoubleOrNull()
+                  if (parsed == null) {
+                    marksError = "Enter a valid number"
+                  } else if (parsed < 0.0 || (maxMarks > 0.0 && parsed > maxMarks)) {
+                    marksError = "Marks must be between 0 and ${formatMarks(maxMarks)}"
+                  } else {
+                    marksError = null
+                    onUpdate(parsed, feedbackInput)
+                  }
+                },
+                label = { Text("Awarded Marks (Max ${formatMarks(maxMarks)})", fontSize = 12.sp) },
+                leadingIcon = {
+                  Icon(
+                    imageVector = Icons.Default.Grade,
+                    contentDescription = null,
+                    tint = RoyalBlue,
+                    modifier = Modifier.size(18.dp),
+                  )
+                },
+                singleLine = true,
+                isError = marksError != null,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                textStyle = TextStyle(
+                  fontSize = 14.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary,
+                ),
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = Color.White,
+                  unfocusedContainerColor = Color.White,
+                  focusedBorderColor = RoyalBlue,
+                  unfocusedBorderColor = BorderGray,
+                  errorBorderColor = StatusWarning,
+                  cursorColor = RoyalBlue,
+                ),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("question_marks_input_$qLabel"),
+              )
+
+              if (marksError != null) {
+                Text(
+                  text = marksError!!,
+                  fontSize = 11.sp,
+                  color = StatusWarning,
+                  fontWeight = FontWeight.Medium,
+                )
+              }
+
+              OutlinedTextField(
+                value = feedbackInput,
+                onValueChange = { updatedFeedback ->
+                  feedbackInput = updatedFeedback
+                  val parsedMarks = marksInput.trim().toDoubleOrNull() ?: awarded
+                  onUpdate(parsedMarks, updatedFeedback)
+                },
+                label = { Text("Feedback", fontSize = 12.sp) },
+                minLines = 2,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(
+                  capitalization = KeyboardCapitalization.Sentences
+                ),
+                textStyle = TextStyle(
+                  fontSize = 13.sp,
+                  color = TextPrimary,
+                ),
+                shape = RoundedCornerShape(10.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedContainerColor = Color.White,
+                  unfocusedContainerColor = Color.White,
+                  focusedBorderColor = RoyalBlue,
+                  unfocusedBorderColor = BorderGray,
+                  cursorColor = RoyalBlue,
+                ),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("question_feedback_input_$qLabel"),
+              )
+            }
+          }
         }
       }
     }
+  }
+}
+
+private fun formatMarks(value: Double): String {
+  return if (value % 1.0 == 0.0) {
+    value.toInt().toString()
+  } else {
+    String.format(Locale.US, "%.1f", value)
   }
 }

@@ -1,5 +1,6 @@
 package com.example.ui.exam
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,14 +21,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -36,33 +38,49 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Exam
-import com.example.ui.theme.PrimaryBlue
-import com.example.ui.theme.TertiaryAmber
+import com.example.ui.components.GradeScanStitchHeader
+import com.example.ui.theme.AccentViolet
+import com.example.ui.theme.AccentVioletContainer
+import com.example.ui.theme.BackgroundLight
+import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
+import com.example.ui.theme.DarkRoyalBlue
+import com.example.ui.theme.FigtreeFontFamily
+import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.PrimaryBlueGradient
+import com.example.ui.theme.RoyalBlue
+import com.example.ui.theme.SecondaryTeal
+import com.example.ui.theme.SecondaryTealContainer
+import com.example.ui.theme.StatusAmber
+import com.example.ui.theme.StatusWarning
+import com.example.ui.theme.StatusWarningContainer
+import com.example.ui.theme.TertiaryAmberContainer
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,109 +123,65 @@ fun ExamsScreen(
   }
 
   if (examToDelete != null) {
-    AlertDialog(
-      onDismissRequest = {
-        if (!uiState.isDeleting) examToDelete = null
-      },
-      title = {
-        Text(
-          text = "Delete this exam?",
-          fontWeight = FontWeight.Bold,
-          style = MaterialTheme.typography.titleLarge,
-        )
-      },
-      text = {
-        Text(
-          text = "Deleting \"${examToDelete?.name}\" will permanently delete the exam and all of its associated classes. This action cannot be undone.",
-          style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            examToDelete?.id?.let { id ->
-              viewModel.deleteExam(id) {
-                examToDelete = null
-              }
-            }
-          },
-          enabled = !uiState.isDeleting,
-          colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.error,
-            contentColor = MaterialTheme.colorScheme.onError,
-          ),
-          shape = RoundedCornerShape(10.dp),
-          modifier = Modifier.testTag("confirm_delete_exam_button"),
-        ) {
-          if (uiState.isDeleting) {
-            CircularProgressIndicator(
-              color = MaterialTheme.colorScheme.onError,
-              strokeWidth = 2.dp,
-              modifier = Modifier.size(16.dp),
-            )
-          } else {
-            Text("Delete")
+    com.example.ui.components.GradeScanConfirmationDialog(
+      title = "Delete this exam?",
+      subtitle = "Permanent deletion",
+      message = "Deleting \"${examToDelete?.name}\" will permanently delete the exam and all of its associated classes. This action cannot be undone.",
+      confirmText = "Delete",
+      dismissText = "Cancel",
+      icon = Icons.Default.DeleteOutline,
+      isDestructive = true,
+      isLoading = uiState.isDeleting,
+      dialogTestTag = "delete_exam_dialog",
+      confirmTestTag = "confirm_delete_exam_button",
+      dismissTestTag = "cancel_delete_exam_button",
+      onConfirm = {
+        examToDelete?.id?.let { id ->
+          viewModel.deleteExam(id) {
+            examToDelete = null
           }
         }
       },
-      dismissButton = {
-        TextButton(
-          onClick = { examToDelete = null },
-          enabled = !uiState.isDeleting,
-          modifier = Modifier.testTag("cancel_delete_exam_button"),
-        ) {
-          Text("Cancel")
-        }
+      onDismiss = {
+        if (!uiState.isDeleting) examToDelete = null
       },
-      shape = RoundedCornerShape(18.dp),
-      modifier = Modifier.testTag("delete_exam_dialog"),
     )
   }
 
   Scaffold(
+    containerColor = BackgroundLight,
     topBar = {
-      TopAppBar(
-        title = {
-          Text(
-            text = "Exams",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-          )
-        },
-        navigationIcon = {
-          IconButton(
-            onClick = onNavigateBack,
-            modifier = Modifier.testTag("exams_back_button"),
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Back",
-            )
-          }
-        },
+      GradeScanStitchHeader(
+        title = "Exams",
+        subtitle = "Create and manage examination schedules",
+        badgeText = "EXAM MANAGEMENT",
+        onBackClick = onNavigateBack,
+        backTestTag = "exams_back_button",
         actions = {
           IconButton(
             onClick = viewModel::loadExams,
-            modifier = Modifier.testTag("refresh_exams_button"),
+            modifier = Modifier
+              .size(40.dp)
+              .clip(CircleShape)
+              .background(Color.White.copy(alpha = 0.18f))
+              .testTag("refresh_exams_button"),
           ) {
             Icon(
               imageVector = Icons.Default.Refresh,
               contentDescription = "Refresh",
+              tint = Color.White,
+              modifier = Modifier.size(20.dp),
             )
           }
         },
-        colors = TopAppBarDefaults.topAppBarColors(
-          containerColor = MaterialTheme.colorScheme.background,
-        ),
       )
     },
     floatingActionButton = {
       FloatingActionButton(
         onClick = viewModel::openCreateDialog,
-        containerColor = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        shape = RoundedCornerShape(16.dp),
+        containerColor = RoyalBlue,
+        contentColor = Color.White,
+        shape = RoundedCornerShape(18.dp),
         modifier = Modifier.testTag("create_exam_fab"),
       ) {
         Icon(
@@ -222,7 +196,7 @@ fun ExamsScreen(
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
+        .background(BackgroundLight)
         .padding(paddingValues),
     ) {
       when {
@@ -232,106 +206,180 @@ fun ExamsScreen(
             contentAlignment = Alignment.Center,
           ) {
             CircularProgressIndicator(
-              color = MaterialTheme.colorScheme.primary,
-              strokeWidth = 3.dp,
+              color = RoyalBlue,
             )
           }
         }
 
         uiState.errorMessage != null && uiState.exams.isEmpty() -> {
-          Column(
+          Box(
             modifier = Modifier
               .fillMaxSize()
-              .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+              .padding(24.dp),
+            contentAlignment = Alignment.Center,
           ) {
-            Text(
-              text = "Unable to load exams",
-              style = MaterialTheme.typography.titleMedium,
-              fontWeight = FontWeight.SemiBold,
-              color = MaterialTheme.colorScheme.error,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-              text = uiState.errorMessage ?: "",
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-              onClick = viewModel::loadExams,
-              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+            Card(
+              shape = RoundedCornerShape(20.dp),
+              colors = CardDefaults.cardColors(containerColor = Color.White),
+              border = BorderStroke(1.dp, BorderGray),
+              elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+              modifier = Modifier.fillMaxWidth(),
             ) {
-              Text("Retry")
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+              ) {
+                Surface(
+                  shape = CircleShape,
+                  color = StatusWarningContainer,
+                  modifier = Modifier.size(60.dp),
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                      imageVector = Icons.Default.ErrorOutline,
+                      contentDescription = null,
+                      tint = StatusWarning,
+                      modifier = Modifier.size(28.dp),
+                    )
+                  }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                  text = "Unable to load exams",
+                  fontFamily = BricolageGrotesqueFontFamily,
+                  fontSize = 18.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                  text = uiState.errorMessage ?: "",
+                  fontFamily = FigtreeFontFamily,
+                  fontSize = 13.5.sp,
+                  color = TextSecondary,
+                  textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(
+                  onClick = viewModel::loadExams,
+                  shape = RoundedCornerShape(14.dp),
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = RoyalBlue,
+                    contentColor = Color.White,
+                  ),
+                ) {
+                  Text(
+                    text = "Retry",
+                    fontFamily = FigtreeFontFamily,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+              }
             }
           }
         }
 
         uiState.exams.isEmpty() -> {
-          // Clean empty state (NO mock data!)
-          Column(
+          Box(
             modifier = Modifier
               .fillMaxSize()
-              .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+              .padding(24.dp),
+            contentAlignment = Alignment.Center,
           ) {
-            Surface(
-              shape = CircleShape,
-              color = MaterialTheme.colorScheme.primaryContainer,
-              modifier = Modifier.size(64.dp),
+            Card(
+              shape = RoundedCornerShape(20.dp),
+              colors = CardDefaults.cardColors(containerColor = Color.White),
+              border = BorderStroke(1.dp, BorderGray),
+              elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+              modifier = Modifier.fillMaxWidth(),
             ) {
-              Box(contentAlignment = Alignment.Center) {
-                Icon(
-                  imageVector = Icons.Default.FolderOpen,
-                  contentDescription = "No exams",
-                  tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                  modifier = Modifier.size(32.dp),
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+              ) {
+                Surface(
+                  shape = CircleShape,
+                  color = LightBlueHighlight,
+                  modifier = Modifier.size(68.dp),
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                      imageVector = Icons.Default.FolderOpen,
+                      contentDescription = "No exams",
+                      tint = RoyalBlue,
+                      modifier = Modifier.size(32.dp),
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                  text = "No exams found",
+                  fontFamily = BricolageGrotesqueFontFamily,
+                  fontSize = 19.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TextPrimary,
                 )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                  text = "Create your first exam to organize classes and scan papers.",
+                  fontFamily = FigtreeFontFamily,
+                  fontSize = 14.sp,
+                  color = TextSecondary,
+                  textAlign = TextAlign.Center,
+                )
+
+                Spacer(modifier = Modifier.height(22.dp))
+
+                val buttonShape = RoundedCornerShape(14.dp)
+                Box(
+                  modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .shadow(
+                      elevation = 3.dp,
+                      shape = buttonShape,
+                      spotColor = DarkRoyalBlue.copy(alpha = 0.25f),
+                    )
+                    .clip(buttonShape)
+                    .background(PrimaryBlueGradient)
+                    .clickable(onClick = viewModel::openCreateDialog)
+                    .padding(horizontal = 24.dp, vertical = 12.dp)
+                    .testTag("empty_state_create_exam_button"),
+                  contentAlignment = Alignment.Center,
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                      imageVector = Icons.Default.Add,
+                      contentDescription = null,
+                      tint = Color.White,
+                      modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = "Create Exam",
+                      fontFamily = FigtreeFontFamily,
+                      fontWeight = FontWeight.Bold,
+                      fontSize = 14.sp,
+                      color = Color.White,
+                    )
+                  }
+                }
               }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-              text = "No exams found",
-              style = MaterialTheme.typography.titleMedium,
-              fontWeight = FontWeight.SemiBold,
-              color = MaterialTheme.colorScheme.onSurface,
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-              text = "Create your first exam to organize classes and scan papers.",
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Button(
-              onClick = viewModel::openCreateDialog,
-              shape = RoundedCornerShape(12.dp),
-              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-              modifier = Modifier.testTag("empty_state_create_exam_button"),
-            ) {
-              Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text("Create Exam")
             }
           }
         }
 
         else -> {
           LazyColumn(
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 88.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier
               .fillMaxSize()
               .testTag("exams_list"),
@@ -361,28 +409,48 @@ fun ExamCard(
   onDeleteClick: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  val (badgeBg, badgeFg) = when (exam.type.lowercase()) {
-    "mid term" -> Pair(Color(0xFFDBEAFE), PrimaryBlue)
-    "final" -> Pair(Color(0xFFEDE9FE), Color(0xFF5B21B6))
-    "supply" -> Pair(Color(0xFFFEF3C7), TertiaryAmber)
-    else -> Pair(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+  val (badgeBg, badgeFg, iconBg, iconTint) = when (exam.type.lowercase()) {
+    "mid term" -> listOf(LightBlueHighlight, DarkRoyalBlue, LightBlueHighlight, RoyalBlue)
+    "final" -> listOf(AccentVioletContainer, AccentViolet, AccentVioletContainer, AccentViolet)
+    "supply" -> listOf(TertiaryAmberContainer, StatusAmber, TertiaryAmberContainer, StatusAmber)
+    else -> listOf(SecondaryTealContainer, SecondaryTeal, SecondaryTealContainer, SecondaryTeal)
   }
 
+  val shape = RoundedCornerShape(20.dp)
   Card(
-    shape = RoundedCornerShape(16.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
+    shape = shape,
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    border = BorderStroke(1.dp, BorderGray),
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     modifier = modifier
       .fillMaxWidth()
+      .clip(shape)
       .clickable(onClick = onClick)
       .testTag("exam_card_${exam.name}"),
   ) {
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 16.dp, vertical = 14.dp),
+        .padding(horizontal = 18.dp, vertical = 18.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
+      Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = iconBg,
+        modifier = Modifier.size(48.dp),
+      ) {
+        Box(contentAlignment = Alignment.Center) {
+          Icon(
+            imageVector = Icons.Default.Description,
+            contentDescription = null,
+            tint = iconTint,
+            modifier = Modifier.size(24.dp),
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.width(14.dp))
+
       Column(modifier = Modifier.weight(1f)) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
@@ -390,29 +458,31 @@ fun ExamCard(
         ) {
           Text(
             text = exam.name,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
+            fontFamily = BricolageGrotesqueFontFamily,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
           )
 
           Surface(
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(8.dp),
             color = badgeBg,
           ) {
             Text(
               text = exam.type,
               color = badgeFg,
-              style = MaterialTheme.typography.labelSmall,
-              fontWeight = FontWeight.SemiBold,
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+              fontFamily = FigtreeFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 11.5.sp,
+              modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
             )
           }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Row(
           verticalAlignment = Alignment.CenterVertically,
@@ -421,39 +491,44 @@ fun ExamCard(
           Icon(
             imageVector = Icons.Default.CalendarToday,
             contentDescription = "Date",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(14.dp),
+            tint = TextSecondary,
+            modifier = Modifier.size(13.dp),
           )
           Text(
             text = exam.date,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FigtreeFontFamily,
+            fontSize = 13.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium,
           )
         }
       }
 
-      Spacer(modifier = Modifier.width(8.dp))
+      Spacer(modifier = Modifier.width(6.dp))
 
-      // Delete exam button with trash icon
       IconButton(
         onClick = onDeleteClick,
         modifier = Modifier
-          .size(40.dp)
+          .size(38.dp)
+          .clip(CircleShape)
+          .background(StatusWarningContainer.copy(alpha = 0.6f))
           .testTag("delete_exam_button_${exam.name}"),
       ) {
         Icon(
           imageVector = Icons.Default.DeleteOutline,
           contentDescription = "Delete Exam",
-          tint = MaterialTheme.colorScheme.error,
-          modifier = Modifier.size(20.dp),
+          tint = StatusWarning,
+          modifier = Modifier.size(19.dp),
         )
       }
+
+      Spacer(modifier = Modifier.width(8.dp))
 
       Icon(
         imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
         contentDescription = "Open Exam",
-        tint = MaterialTheme.colorScheme.outline,
-        modifier = Modifier.size(16.dp),
+        tint = TextSecondary,
+        modifier = Modifier.size(14.dp),
       )
     }
   }

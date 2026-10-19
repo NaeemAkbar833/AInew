@@ -1,15 +1,18 @@
 package com.example.ui.exam
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,56 +21,72 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Class
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Grade
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WbTwilight
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.ClassRoom
 import com.example.ui.classes.AddClassDialog
 import com.example.ui.classes.ClassViewModel
-import com.example.ui.theme.PrimaryBlue
+import com.example.ui.components.GradeScanStitchHeader
+import com.example.ui.theme.AccentViolet
+import com.example.ui.theme.AccentVioletContainer
+import com.example.ui.theme.BackgroundLight
+import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
+import com.example.ui.theme.DarkRoyalBlue
+import com.example.ui.theme.FigtreeFontFamily
+import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.PrimaryBlueGradient
+import com.example.ui.theme.RoyalBlue
 import com.example.ui.theme.SecondaryTeal
-import com.example.ui.theme.TertiaryAmber
+import com.example.ui.theme.SecondaryTealContainer
+import com.example.ui.theme.StatusAmber
+import com.example.ui.theme.StatusWarning
+import com.example.ui.theme.StatusWarningContainer
+import com.example.ui.theme.TertiaryAmberContainer
+import com.example.ui.theme.TextPrimary
+import com.example.ui.theme.TextSecondary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,167 +143,85 @@ fun ExamDetailScreen(
     )
   }
 
-  // Delete Exam Confirmation Dialog
   if (showDeleteExamDialog) {
-    AlertDialog(
-      onDismissRequest = {
+    com.example.ui.components.GradeScanConfirmationDialog(
+      title = "Delete this exam?",
+      subtitle = "Permanent deletion",
+      message = "Deleting \"${examUiState.selectedExam?.name}\" will also permanently delete all of its classes. This action cannot be undone.",
+      confirmText = "Delete Exam",
+      dismissText = "Cancel",
+      icon = Icons.Default.DeleteOutline,
+      isDestructive = true,
+      isLoading = examUiState.isDeleting,
+      dialogTestTag = "delete_exam_from_detail_dialog",
+      confirmTestTag = "confirm_delete_exam_from_detail_button",
+      dismissTestTag = "cancel_delete_exam_from_detail_button",
+      onConfirm = {
+        examViewModel.deleteExam(examId) {
+          showDeleteExamDialog = false
+          onNavigateBack()
+        }
+      },
+      onDismiss = {
         if (!examUiState.isDeleting) showDeleteExamDialog = false
       },
-      title = {
-        Text(
-          text = "Delete this exam?",
-          fontWeight = FontWeight.Bold,
-          style = MaterialTheme.typography.titleLarge,
-        )
-      },
-      text = {
-        Text(
-          text = "Deleting \"${examUiState.selectedExam?.name}\" will also permanently delete all of its classes. This action cannot be undone.",
-          style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            examViewModel.deleteExam(examId) {
-              showDeleteExamDialog = false
-              onNavigateBack()
-            }
-          },
-          enabled = !examUiState.isDeleting,
-          colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.error,
-            contentColor = MaterialTheme.colorScheme.onError,
-          ),
-          shape = RoundedCornerShape(10.dp),
-          modifier = Modifier.testTag("confirm_delete_exam_from_detail_button"),
-        ) {
-          if (examUiState.isDeleting) {
-            CircularProgressIndicator(
-              color = MaterialTheme.colorScheme.onError,
-              strokeWidth = 2.dp,
-              modifier = Modifier.size(16.dp),
-            )
-          } else {
-            Text("Delete Exam")
-          }
-        }
-      },
-      dismissButton = {
-        TextButton(
-          onClick = { showDeleteExamDialog = false },
-          enabled = !examUiState.isDeleting,
-          modifier = Modifier.testTag("cancel_delete_exam_from_detail_button"),
-        ) {
-          Text("Cancel")
-        }
-      },
-      shape = RoundedCornerShape(18.dp),
-      modifier = Modifier.testTag("delete_exam_from_detail_dialog"),
     )
   }
 
-  // Delete Class Confirmation Dialog
   if (classToDelete != null) {
-    AlertDialog(
-      onDismissRequest = {
-        if (!classUiState.isDeleting) classToDelete = null
-      },
-      title = {
-        Text(
-          text = "Delete this class?",
-          fontWeight = FontWeight.Bold,
-          style = MaterialTheme.typography.titleLarge,
-        )
-      },
-      text = {
-        Text(
-          text = "Are you sure you want to permanently delete \"${classToDelete?.subjectName}\"? This action cannot be undone.",
-          style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            classToDelete?.id?.let { cid ->
-              classViewModel.deleteClass(cid) {
-                classToDelete = null
-              }
-            }
-          },
-          enabled = !classUiState.isDeleting,
-          colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.error,
-            contentColor = MaterialTheme.colorScheme.onError,
-          ),
-          shape = RoundedCornerShape(10.dp),
-          modifier = Modifier.testTag("confirm_delete_class_button"),
-        ) {
-          if (classUiState.isDeleting) {
-            CircularProgressIndicator(
-              color = MaterialTheme.colorScheme.onError,
-              strokeWidth = 2.dp,
-              modifier = Modifier.size(16.dp),
-            )
-          } else {
-            Text("Delete Class")
+    com.example.ui.components.GradeScanConfirmationDialog(
+      title = "Delete this class?",
+      subtitle = "Permanent deletion",
+      message = "Are you sure you want to permanently delete \"${classToDelete?.subjectName}\"? This action cannot be undone.",
+      confirmText = "Delete Class",
+      dismissText = "Cancel",
+      icon = Icons.Default.DeleteOutline,
+      isDestructive = true,
+      isLoading = classUiState.isDeleting,
+      dialogTestTag = "delete_class_dialog",
+      confirmTestTag = "confirm_delete_class_button",
+      dismissTestTag = "cancel_delete_class_button",
+      onConfirm = {
+        classToDelete?.id?.let { cid ->
+          classViewModel.deleteClass(cid) {
+            classToDelete = null
           }
         }
       },
-      dismissButton = {
-        TextButton(
-          onClick = { classToDelete = null },
-          enabled = !classUiState.isDeleting,
-          modifier = Modifier.testTag("cancel_delete_class_button"),
-        ) {
-          Text("Cancel")
-        }
+      onDismiss = {
+        if (!classUiState.isDeleting) classToDelete = null
       },
-      shape = RoundedCornerShape(18.dp),
-      modifier = Modifier.testTag("delete_class_dialog"),
     )
   }
 
   Scaffold(
+    containerColor = BackgroundLight,
     topBar = {
-      TopAppBar(
-        title = {
-          Text(
-            text = examUiState.selectedExam?.name ?: "Exam Details",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-          )
-        },
-        navigationIcon = {
-          IconButton(
-            onClick = onNavigateBack,
-            modifier = Modifier.testTag("exam_detail_back_button"),
-          ) {
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-              contentDescription = "Back",
-            )
-          }
-        },
+      GradeScanStitchHeader(
+        title = examUiState.selectedExam?.name ?: "Exam Details",
+        subtitle = examUiState.selectedExam?.let { "${it.type} • ${it.date}" } ?: "Manage classes for this exam",
+        badgeText = "EXAM OVERVIEW",
+        onBackClick = onNavigateBack,
+        backTestTag = "exam_detail_back_button",
         actions = {
           if (examUiState.selectedExam != null) {
             IconButton(
               onClick = { showDeleteExamDialog = true },
-              modifier = Modifier.testTag("delete_exam_detail_action"),
+              modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.18f))
+                .testTag("delete_exam_detail_action"),
             ) {
               Icon(
                 imageVector = Icons.Default.DeleteOutline,
                 contentDescription = "Delete Exam",
-                tint = MaterialTheme.colorScheme.error,
+                tint = Color.White,
+                modifier = Modifier.size(20.dp),
               )
             }
           }
         },
-        colors = TopAppBarDefaults.topAppBarColors(
-          containerColor = MaterialTheme.colorScheme.background,
-        ),
       )
     },
     snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -293,7 +230,7 @@ fun ExamDetailScreen(
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(MaterialTheme.colorScheme.background)
+        .background(BackgroundLight)
         .padding(paddingValues),
     ) {
       if (examUiState.isLoadingDetail && examUiState.selectedExam == null) {
@@ -302,8 +239,7 @@ fun ExamDetailScreen(
           contentAlignment = Alignment.Center,
         ) {
           CircularProgressIndicator(
-            color = MaterialTheme.colorScheme.primary,
-            strokeWidth = 3.dp,
+            color = RoyalBlue,
           )
         }
       } else {
@@ -318,32 +254,46 @@ fun ExamDetailScreen(
           ) {
             Text(
               text = "Exam not found",
-              style = MaterialTheme.typography.titleMedium,
-              color = MaterialTheme.colorScheme.error,
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 18.sp,
+              fontWeight = FontWeight.Bold,
+              color = StatusWarning,
             )
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onNavigateBack) {
-              Text("Back to Exams")
+            Button(
+              onClick = onNavigateBack,
+              shape = RoundedCornerShape(14.dp),
+              colors = ButtonDefaults.buttonColors(
+                containerColor = RoyalBlue,
+                contentColor = Color.White,
+              ),
+            ) {
+              Text(
+                text = "Back to Exams",
+                fontFamily = FigtreeFontFamily,
+                fontWeight = FontWeight.Bold,
+              )
             }
           }
         } else {
           val (badgeBg, badgeFg) = when (exam.type.lowercase()) {
-            "mid term" -> Pair(Color(0xFFDBEAFE), PrimaryBlue)
-            "final" -> Pair(Color(0xFFEDE9FE), Color(0xFF5B21B6))
-            "supply" -> Pair(Color(0xFFFEF3C7), TertiaryAmber)
-            else -> Pair(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
+            "mid term" -> Pair(LightBlueHighlight, DarkRoyalBlue)
+            "final" -> Pair(AccentVioletContainer, AccentViolet)
+            "supply" -> Pair(TertiaryAmberContainer, StatusAmber)
+            else -> Pair(LightBlueHighlight, RoyalBlue)
           }
 
           Column(
             modifier = Modifier
               .fillMaxSize()
               .verticalScroll(scrollState)
-              .padding(horizontal = 20.dp, vertical = 16.dp),
+              .padding(horizontal = 20.dp, vertical = 18.dp),
           ) {
-            // Exam Information Card (Strictly Exam Name, Exam Type, Exam Date)
+            // Exam Information Card
             Card(
-              shape = RoundedCornerShape(18.dp),
-              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+              shape = RoundedCornerShape(20.dp),
+              colors = CardDefaults.cardColors(containerColor = Color.White),
+              border = BorderStroke(1.dp, BorderGray),
               elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
               modifier = Modifier
                 .fillMaxWidth()
@@ -359,29 +309,55 @@ fun ExamDetailScreen(
                   horizontalArrangement = Arrangement.SpaceBetween,
                   modifier = Modifier.fillMaxWidth(),
                 ) {
-                  Text(
-                    text = exam.name,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.weight(1f),
-                  )
+                  ) {
+                    Surface(
+                      shape = RoundedCornerShape(14.dp),
+                      color = LightBlueHighlight,
+                      modifier = Modifier.size(48.dp),
+                    ) {
+                      Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                          imageVector = Icons.Default.Description,
+                          contentDescription = null,
+                          tint = RoyalBlue,
+                          modifier = Modifier.size(24.dp),
+                        )
+                      }
+                    }
+
+                    Text(
+                      text = exam.name,
+                      fontFamily = BricolageGrotesqueFontFamily,
+                      fontSize = 19.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = TextPrimary,
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.width(8.dp))
 
                   Surface(
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(10.dp),
                     color = badgeBg,
                   ) {
                     Text(
                       text = exam.type,
                       color = badgeFg,
-                      style = MaterialTheme.typography.labelMedium,
-                      fontWeight = FontWeight.SemiBold,
-                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     )
                   }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = BorderGray, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Row(
                   verticalAlignment = Alignment.CenterVertically,
@@ -389,21 +365,22 @@ fun ExamDetailScreen(
                   Icon(
                     imageVector = Icons.Default.CalendarToday,
                     contentDescription = "Exam Date",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
+                    tint = RoyalBlue,
+                    modifier = Modifier.size(16.dp),
                   )
                   Spacer(modifier = Modifier.width(8.dp))
                   Text(
                     text = "Exam Date: ${exam.date}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontFamily = FigtreeFontFamily,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextSecondary,
                   )
                 }
               }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Classes Section Header with "Add Class" Button
             Row(
@@ -417,42 +394,56 @@ fun ExamDetailScreen(
               ) {
                 Text(
                   text = "Classes",
-                  style = MaterialTheme.typography.titleMedium,
+                  fontFamily = BricolageGrotesqueFontFamily,
+                  fontSize = 18.sp,
                   fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.onBackground,
+                  color = TextPrimary,
                 )
                 if (classUiState.classes.isNotEmpty()) {
                   Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(10.dp),
+                    color = LightBlueHighlight,
                   ) {
                     Text(
                       text = "${classUiState.classes.size}",
-                      style = MaterialTheme.typography.labelSmall,
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 12.sp,
                       fontWeight = FontWeight.Bold,
-                      color = MaterialTheme.colorScheme.onPrimaryContainer,
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                      color = DarkRoyalBlue,
+                      modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp),
                     )
                   }
                 }
               }
 
-              // Add Class Button opens Add Class Popup Dialog
-              OutlinedButton(
-                onClick = classViewModel::openAddClassDialog,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.testTag("add_class_button"),
+              val btnShape = RoundedCornerShape(12.dp)
+              Box(
+                modifier = Modifier
+                  .heightIn(min = 38.dp)
+                  .shadow(elevation = 2.dp, shape = btnShape, spotColor = DarkRoyalBlue.copy(alpha = 0.25f))
+                  .clip(btnShape)
+                  .background(PrimaryBlueGradient)
+                  .clickable(onClick = classViewModel::openAddClassDialog)
+                  .padding(horizontal = 14.dp, vertical = 8.dp)
+                  .testTag("add_class_button"),
+                contentAlignment = Alignment.Center,
               ) {
-                Icon(
-                  imageVector = Icons.Default.Add,
-                  contentDescription = null,
-                  modifier = Modifier.size(16.dp),
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                  text = "Add Class",
-                  style = MaterialTheme.typography.labelMedium,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
+                  )
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = "Add Class",
+                    fontFamily = FigtreeFontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                  )
+                }
               }
             }
 
@@ -467,7 +458,7 @@ fun ExamDetailScreen(
                   contentAlignment = Alignment.Center,
                 ) {
                   CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary,
+                    color = RoyalBlue,
                     strokeWidth = 2.dp,
                     modifier = Modifier.size(24.dp),
                   )
@@ -475,11 +466,11 @@ fun ExamDetailScreen(
               }
 
               classUiState.classes.isEmpty() -> {
-                // Classes Empty State (Clean placeholder, NO mock classes)
                 Card(
-                  shape = RoundedCornerShape(16.dp),
-                  colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                  elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                  shape = RoundedCornerShape(20.dp),
+                  colors = CardDefaults.cardColors(containerColor = Color.White),
+                  border = BorderStroke(1.dp, BorderGray),
+                  elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                   modifier = Modifier
                     .fillMaxWidth()
                     .testTag("classes_empty_state_card"),
@@ -492,14 +483,14 @@ fun ExamDetailScreen(
                   ) {
                     Surface(
                       shape = CircleShape,
-                      color = MaterialTheme.colorScheme.surfaceVariant,
-                      modifier = Modifier.size(48.dp),
+                      color = LightBlueHighlight,
+                      modifier = Modifier.size(52.dp),
                     ) {
                       Box(contentAlignment = Alignment.Center) {
                         Icon(
                           imageVector = Icons.Default.Class,
                           contentDescription = "No classes",
-                          tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                          tint = RoyalBlue,
                           modifier = Modifier.size(24.dp),
                         )
                       }
@@ -509,27 +500,28 @@ fun ExamDetailScreen(
 
                     Text(
                       text = "No classes added yet",
-                      style = MaterialTheme.typography.titleSmall,
-                      fontWeight = FontWeight.SemiBold,
-                      color = MaterialTheme.colorScheme.onSurface,
+                      fontFamily = BricolageGrotesqueFontFamily,
+                      fontSize = 16.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = TextPrimary,
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
                       text = "Tap '+ Add Class' to add a class session to this exam.",
-                      style = MaterialTheme.typography.bodySmall,
-                      color = MaterialTheme.colorScheme.onSurfaceVariant,
-                      textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                      fontFamily = FigtreeFontFamily,
+                      fontSize = 13.sp,
+                      color = TextSecondary,
+                      textAlign = TextAlign.Center,
                     )
                   }
                 }
               }
 
               else -> {
-                // List of Real Classes Belonging to this Exam
                 Column(
-                  verticalArrangement = Arrangement.spacedBy(10.dp),
+                  verticalArrangement = Arrangement.spacedBy(12.dp),
                   modifier = Modifier
                     .fillMaxWidth()
                     .testTag("classes_list"),
@@ -563,48 +555,75 @@ fun ClassCard(
   modifier: Modifier = Modifier,
 ) {
   val isMorning = classRoom.timing.equals("Morning", ignoreCase = true)
-  val timingBadgeBg = if (isMorning) Color(0xFFFEF3C7) else Color(0xFFEDE9FE)
-  val timingBadgeFg = if (isMorning) TertiaryAmber else Color(0xFF5B21B6)
+  val timingBadgeBg = if (isMorning) TertiaryAmberContainer else AccentVioletContainer
+  val timingBadgeFg = if (isMorning) StatusAmber else AccentViolet
   val timingIcon = if (isMorning) Icons.Default.WbSunny else Icons.Default.WbTwilight
 
+  val shape = RoundedCornerShape(20.dp)
   Card(
-    shape = RoundedCornerShape(14.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    shape = shape,
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    border = BorderStroke(1.dp, BorderGray),
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     modifier = modifier
       .fillMaxWidth()
+      .clip(shape)
       .clickable(onClick = onClick)
       .testTag("class_card_${classRoom.subjectName}"),
   ) {
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(16.dp),
+        .padding(18.dp),
     ) {
       Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier.fillMaxWidth(),
       ) {
-        Text(
-          text = classRoom.subjectName,
-          style = MaterialTheme.typography.titleMedium,
-          fontWeight = FontWeight.SemiBold,
-          color = MaterialTheme.colorScheme.onSurface,
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(12.dp),
           modifier = Modifier.weight(1f),
-        )
+        ) {
+          Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = SecondaryTealContainer,
+            modifier = Modifier.size(42.dp),
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Icon(
+                imageVector = Icons.Default.School,
+                contentDescription = null,
+                tint = SecondaryTeal,
+                modifier = Modifier.size(20.dp),
+              )
+            }
+          }
+
+          Text(
+            text = classRoom.subjectName,
+            fontFamily = BricolageGrotesqueFontFamily,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+          )
+        }
 
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
           Surface(
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(8.dp),
             color = timingBadgeBg,
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
               Icon(
                 imageVector = timingIcon,
@@ -616,8 +635,9 @@ fun ClassCard(
               Text(
                 text = classRoom.timing,
                 color = timingBadgeFg,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
+                fontFamily = FigtreeFontFamily,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Bold,
               )
             }
           }
@@ -625,20 +645,29 @@ fun ClassCard(
           IconButton(
             onClick = onDeleteClick,
             modifier = Modifier
-              .size(32.dp)
+              .size(34.dp)
+              .clip(CircleShape)
+              .background(StatusWarningContainer.copy(alpha = 0.6f))
               .testTag("delete_class_button_${classRoom.subjectName}"),
           ) {
             Icon(
               imageVector = Icons.Default.DeleteOutline,
               contentDescription = "Delete Class",
-              tint = MaterialTheme.colorScheme.error,
+              tint = StatusWarning,
               modifier = Modifier.size(18.dp),
             )
           }
+
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = "Open Class",
+            tint = TextSecondary,
+            modifier = Modifier.size(13.dp),
+          )
         }
       }
 
-      Spacer(modifier = Modifier.height(10.dp))
+      Spacer(modifier = Modifier.height(12.dp))
 
       Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -648,14 +677,16 @@ fun ClassCard(
           Icon(
             imageVector = Icons.Default.CalendarMonth,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = TextSecondary,
             modifier = Modifier.size(14.dp),
           )
           Spacer(modifier = Modifier.width(4.dp))
           Text(
             text = classRoom.session,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.5.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium,
           )
         }
 
@@ -663,14 +694,16 @@ fun ClassCard(
           Icon(
             imageVector = Icons.Default.School,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = TextSecondary,
             modifier = Modifier.size(14.dp),
           )
           Spacer(modifier = Modifier.width(4.dp))
           Text(
             text = classRoom.semester,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.5.sp,
+            color = TextSecondary,
+            fontWeight = FontWeight.Medium,
           )
         }
 
@@ -678,15 +711,16 @@ fun ClassCard(
           Icon(
             imageVector = Icons.Default.Grade,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = RoyalBlue,
             modifier = Modifier.size(14.dp),
           )
           Spacer(modifier = Modifier.width(4.dp))
           Text(
             text = "${classRoom.totalMarks} Marks",
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface,
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary,
           )
         }
       }
@@ -694,25 +728,26 @@ fun ClassCard(
       if (!classRoom.questionPaperPath.isNullOrBlank()) {
         Spacer(modifier = Modifier.height(10.dp))
         Surface(
-          shape = RoundedCornerShape(6.dp),
-          color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+          shape = RoundedCornerShape(8.dp),
+          color = LightBlueHighlight,
         ) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
           ) {
             Icon(
               imageVector = Icons.Default.AttachFile,
               contentDescription = null,
-              tint = MaterialTheme.colorScheme.primary,
+              tint = DarkRoyalBlue,
               modifier = Modifier.size(12.dp),
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
               text = "Question Paper Attached",
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.primary,
-              fontWeight = FontWeight.Medium,
+              fontFamily = FigtreeFontFamily,
+              fontSize = 11.5.sp,
+              color = DarkRoyalBlue,
+              fontWeight = FontWeight.Bold,
             )
           }
         }

@@ -8,6 +8,7 @@ import com.example.data.model.ClassTiming
 import com.example.data.model.Exam
 import com.example.data.model.ExamType
 import com.example.data.model.Student
+import com.example.data.model.ExtractedStudent
 import com.example.data.model.StudentPaper
 import com.example.data.model.StudentPaperPage
 import com.example.data.repository.AuthRepository
@@ -239,6 +240,34 @@ class FakeStudentRepository(
       } else {
         Result.failure(IllegalStateException("Student not found"))
       }
+    }
+  }
+
+  override suspend fun extractStudentList(classId: String, images: List<String>): Result<List<ExtractedStudent>> {
+    return if (shouldFail) {
+      Result.failure(Exception("Failed to extract students"))
+    } else {
+      Result.success(emptyList())
+    }
+  }
+
+  override suspend fun addStudentsBatch(classId: String, students: List<ExtractedStudent>): Result<Int> {
+    return if (shouldFail) {
+      Result.failure(Exception("Failed to add students batch"))
+    } else {
+      students.forEach { s ->
+        this.students.add(
+          Student(
+            id = "student-${this.students.size + 1}",
+            classId = classId,
+            teacherId = "user-123",
+            name = s.name.trim(),
+            fatherName = s.fatherName.trim(),
+            rollNumber = s.rollNumber.trim(),
+          )
+        )
+      }
+      Result.success(students.size)
     }
   }
 }

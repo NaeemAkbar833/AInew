@@ -283,6 +283,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_existing_status TEXT;
+    v_existing_review_reason TEXT;
     v_evaluation_id UUID;
     v_saved_evaluation JSONB;
 BEGIN
@@ -322,13 +323,19 @@ BEGIN
     END IF;
 
     -- 2. Concurrency-Safe Overwrite Protection: Lock row FOR UPDATE
-    SELECT status, id INTO v_existing_status, v_evaluation_id
+    SELECT status, review_reason, id INTO v_existing_status, v_existing_review_reason, v_evaluation_id
     FROM public.student_paper_evaluations
     WHERE paper_id = p_paper_id
     FOR UPDATE;
 
     IF v_existing_status = 'approved' THEN
         RAISE EXCEPTION 'Approved evaluations cannot be overwritten.';
+    END IF;
+
+    -- Protect human edits from AI overwrite (Service role = Edge Function / AI)
+    -- We identify teacher corrections by the 'Teacher corrected' prefix in review_reason
+    IF auth.role() = 'service_role' AND v_existing_review_reason LIKE 'Teacher corrected%' THEN
+        RAISE EXCEPTION 'Human corrections exist for this paper. AI grading cannot silently overwrite teacher effort.';
     END IF;
 
     -- 3. Upsert parent evaluation record
