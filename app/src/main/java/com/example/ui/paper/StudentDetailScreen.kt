@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,6 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -98,9 +100,14 @@ import com.example.ui.components.GradeScanEmptyState
 import com.example.ui.components.GradeScanPrimaryButton
 import com.example.ui.components.SkeletonBox
 import com.example.ui.paper.components.TeacherReviewDialog
+import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
 import com.example.ui.theme.DarkRoyalBlue
+import com.example.ui.theme.FigtreeFontFamily
+import com.example.ui.theme.HeaderBlueGradient
 import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.PrimaryBlue
 import com.example.ui.theme.RoyalBlue
 import com.example.ui.theme.StatusAmber
 import com.example.ui.theme.StatusSuccess
@@ -156,76 +163,185 @@ fun StudentDetailScreen(
     }
   }
 
-  Scaffold(
-    topBar = {
-      com.example.ui.components.GradeScanStitchHeader(
-        title = uiState.student?.name ?: "Student Details",
-        subtitle = "Answer Sheets & Evaluation",
-        badgeText = "PAPER EVALUATION",
-        onBackClick = onNavigateBack,
-        backTestTag = "student_detail_back_button",
-        actions = {
-          IconButton(
-            onClick = { viewModel.loadStudentAndPapers(studentId) },
-            modifier = Modifier
-              .size(48.dp)
-              .testTag("student_detail_refresh_button"),
-          ) {
-            Box(
-              modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.18f)),
-              contentAlignment = Alignment.Center,
-            ) {
-              Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = "Refresh",
-                tint = Color.White,
-                modifier = Modifier.size(18.dp),
-              )
-            }
-          }
-        },
+  val topHeaderBlendGradient = remember {
+    Brush.verticalGradient(
+      colorStops = arrayOf(
+        0.00f to DarkRoyalBlue,
+        0.36f to PrimaryBlue,
+        0.58f to Color(0xFF3358DF),
+        0.76f to Color(0xFF6E8CEF),
+        0.90f to Color(0xFFC2D3FA),
+        1.00f to BackgroundLight,
       )
-    },
-    floatingActionButton = {
-      val student = uiState.student
-      if (!uiState.isLoading && student != null) {
-        ExtendedFloatingActionButton(
-          onClick = { onNavigateToScan(student.id ?: studentId, student.classId) },
-          icon = {
-            Icon(
-              imageVector = Icons.Default.AddAPhoto,
-              contentDescription = null,
-              modifier = Modifier.size(18.dp),
-            )
-          },
-          text = {
-            Text(
-              text = "Scan Answer Sheet",
-              fontSize = 13.5.sp,
-              fontWeight = FontWeight.Bold,
-            )
-          },
-          containerColor = RoyalBlue,
-          contentColor = Color.White,
-          shape = RoundedCornerShape(14.dp),
-          modifier = Modifier.testTag("scan_new_paper_fab"),
-        )
-      }
-    },
-    snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-    containerColor = com.example.ui.theme.BackgroundLight,
-    modifier = modifier.testTag("student_detail_screen"),
-  ) { innerPadding ->
+    )
+  }
+
+  Box(
+    modifier = modifier
+      .fillMaxSize()
+      .background(BackgroundLight)
+      .testTag("student_detail_screen"),
+  ) {
+    // Backdrop gradient layer extending behind topBar down into upper card area
     Box(
       modifier = Modifier
-        .fillMaxSize()
-        .background(com.example.ui.theme.BackgroundLight)
-        .padding(innerPadding),
-      contentAlignment = Alignment.TopCenter,
-    ) {
+        .fillMaxWidth()
+        .height(240.dp)
+        .background(topHeaderBlendGradient),
+    )
+
+    Scaffold(
+      containerColor = Color.Transparent,
+      topBar = {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+            .background(HeaderBlueGradient)
+            .statusBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 4.dp)
+            .testTag("top_app_bar"),
+        ) {
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color.White.copy(alpha = 0.16f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 3.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(48.dp)
+                  .clickable(
+                    role = Role.Button,
+                    onClick = onNavigateBack,
+                  )
+                  .testTag("student_detail_back_button"),
+                contentAlignment = Alignment.Center,
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.20f))
+                    .border(
+                      width = 1.dp,
+                      color = Color.White.copy(alpha = 0.30f),
+                      shape = CircleShape,
+                    ),
+                  contentAlignment = Alignment.Center,
+                ) {
+                  Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
+                  )
+                }
+              }
+
+              Column(
+                modifier = Modifier
+                  .weight(1f)
+                  .padding(horizontal = 4.dp, vertical = 4.dp),
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.Center,
+              ) {
+                Text(
+                  text = uiState.student?.name ?: "Student Details",
+                  fontFamily = BricolageGrotesqueFontFamily,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 19.sp,
+                  color = Color.White,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                  text = "Answer Sheets & Evaluation",
+                  fontFamily = FigtreeFontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 12.sp,
+                  color = Color.White.copy(alpha = 0.85f),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
+
+              Box(
+                modifier = Modifier
+                  .size(48.dp)
+                  .clickable(
+                    role = Role.Button,
+                    onClick = { viewModel.loadStudentAndPapers(studentId) },
+                  )
+                  .testTag("student_detail_refresh_button"),
+                contentAlignment = Alignment.Center,
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.20f))
+                    .border(
+                      width = 1.dp,
+                      color = Color.White.copy(alpha = 0.30f),
+                      shape = CircleShape,
+                    ),
+                  contentAlignment = Alignment.Center,
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
+                  )
+                }
+              }
+            }
+          }
+        }
+      },
+      floatingActionButton = {
+        val student = uiState.student
+        if (!uiState.isLoading && student != null) {
+          ExtendedFloatingActionButton(
+            onClick = { onNavigateToScan(student.id ?: studentId, student.classId) },
+            icon = {
+              Icon(
+                imageVector = Icons.Default.AddAPhoto,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+              )
+            },
+            text = {
+              Text(
+                text = "Scan Answer Sheet",
+                fontFamily = BricolageGrotesqueFontFamily,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold,
+              )
+            },
+            containerColor = RoyalBlue,
+            contentColor = Color.White,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.testTag("scan_new_paper_fab"),
+          )
+        }
+      },
+      snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { innerPadding ->
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(innerPadding),
+        contentAlignment = Alignment.TopCenter,
+      ) {
       when {
         uiState.isLoading -> {
           Column(
@@ -292,12 +408,14 @@ fun StudentDetailScreen(
                 Column(modifier = Modifier.weight(1f)) {
                   Text(
                     text = "Scanned Answer Sheets",
-                    fontSize = 15.sp,
+                    fontFamily = BricolageGrotesqueFontFamily,
+                    fontSize = 15.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
                   )
                   Text(
                     text = "Upload pages, extract OCR text, and run AI grading",
+                    fontFamily = FigtreeFontFamily,
                     fontSize = 12.sp,
                     color = TextSecondary,
                   )
@@ -408,8 +526,6 @@ fun StudentDetailScreen(
       }
     }
   }
-
-  // Delete Confirmation Dialog
   paperToDelete?.let { paper ->
     GradeScanConfirmationDialog(
       title = "Delete Answer Sheet?",
@@ -492,6 +608,7 @@ fun StudentDetailScreen(
     )
   }
 }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -503,29 +620,33 @@ private fun StudentInfoHeaderCard(
     modifier = Modifier
       .fillMaxWidth()
       .testTag("student_info_header_card"),
-    shape = RoundedCornerShape(16.dp),
+    shape = RoundedCornerShape(14.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
-    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     border = BorderStroke(1.dp, BorderGray),
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-      // Top Royal Blue accent bar
+      // Top Royal Blue accent line
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(4.dp)
-          .background(RoyalBlue)
+          .height(3.5.dp)
+          .background(
+            Brush.horizontalGradient(
+              colors = listOf(RoyalBlue, DarkRoyalBlue)
+            )
+          )
       )
 
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+          .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.Top,
+          verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
           Box(
@@ -533,13 +654,14 @@ private fun StudentInfoHeaderCard(
               .size(44.dp)
               .clip(RoundedCornerShape(12.dp))
               .background(LightBlueHighlight)
-              .border(1.dp, RoyalBlue.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
+              .border(1.dp, RoyalBlue.copy(alpha = 0.22f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
           ) {
             val initial = student.name.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "S"
             Text(
               text = initial,
-              fontSize = 16.sp,
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 18.sp,
               fontWeight = FontWeight.Bold,
               color = RoyalBlue,
             )
@@ -547,47 +669,59 @@ private fun StudentInfoHeaderCard(
 
           Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
           ) {
-            Text(
-              text = student.name,
-              fontSize = 16.sp,
-              lineHeight = 20.sp,
-              fontWeight = FontWeight.Bold,
-              color = TextPrimary,
-              maxLines = 2,
-              overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+              Text(
+                text = student.name,
+                fontFamily = BricolageGrotesqueFontFamily,
+                fontSize = 16.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+              )
+
+              Spacer(modifier = Modifier.width(6.dp))
+
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = LightBlueHighlight,
+                border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
+              ) {
+                Text(
+                  text = "Roll #${student.rollNumber}",
+                  fontSize = 11.sp,
+                  fontFamily = FigtreeFontFamily,
+                  fontWeight = FontWeight.Bold,
+                  color = RoyalBlue,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.5.dp),
+                )
+              }
+            }
 
             if (student.fatherName.isNotBlank()) {
               Text(
                 text = "Father: ${student.fatherName}",
-                fontSize = 12.5.sp,
-                lineHeight = 16.5.sp,
+                fontFamily = FigtreeFontFamily,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
                 color = TextSecondary,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-              )
-            }
-
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = LightBlueHighlight,
-              border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.2f)),
-            ) {
-              Text(
-                text = "Roll #${student.rollNumber}",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = RoyalBlue,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
               )
             }
           }
         }
 
         if (classRoom != null) {
-          HorizontalDivider(color = BorderGray)
+          HorizontalDivider(color = BorderGray, thickness = 0.8.dp)
 
           Column(
             modifier = Modifier.fillMaxWidth(),
@@ -606,11 +740,12 @@ private fun StudentInfoHeaderCard(
               )
               Text(
                 text = classRoom.subjectName,
-                fontSize = 13.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontFamily = BricolageGrotesqueFontFamily,
+                fontSize = 13.5.sp,
+                lineHeight = 17.5.sp,
+                fontWeight = FontWeight.Bold,
                 color = TextPrimary,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
               )
@@ -627,16 +762,17 @@ private fun StudentInfoHeaderCard(
               )
               if (classRoom.session.isNotBlank()) {
                 Surface(
-                  shape = RoundedCornerShape(8.dp),
+                  shape = RoundedCornerShape(6.dp),
                   color = LightBlueHighlight,
                   border = BorderStroke(1.dp, BorderGray),
                 ) {
                   Text(
                     text = "Session ${classRoom.session}",
                     fontSize = 11.sp,
+                    fontFamily = FigtreeFontFamily,
                     fontWeight = FontWeight.Medium,
                     color = TextSecondary,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                   )
                 }
               }

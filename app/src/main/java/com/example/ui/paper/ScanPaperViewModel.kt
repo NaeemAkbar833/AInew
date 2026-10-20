@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.LocalScannedPage
 import com.example.data.repository.PaperRepository
+import com.example.data.repository.StudentRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,14 +20,32 @@ data class ScanPaperUiState(
   val uploadProgress: Pair<Int, Int>? = null, // current, total
   val uploadError: String? = null,
   val previewPageUri: Uri? = null,
+  val studentName: String? = null,
+  val studentRollNumber: String? = null,
 )
 
 class ScanPaperViewModel(
   private val paperRepository: PaperRepository,
+  private val studentRepository: StudentRepository? = null,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow(ScanPaperUiState())
   val uiState: StateFlow<ScanPaperUiState> = _uiState.asStateFlow()
+
+  fun loadStudentInfo(studentId: String) {
+    if (studentId.isBlank() || studentRepository == null) return
+    viewModelScope.launch {
+      val result = studentRepository.getStudentById(studentId)
+      result.getOrNull()?.let { student ->
+        _uiState.update { current ->
+          current.copy(
+            studentName = student.name,
+            studentRollNumber = student.rollNumber,
+          )
+        }
+      }
+    }
+  }
 
   fun addPage(uri: Uri) {
     _uiState.update { current ->
@@ -122,7 +141,6 @@ class ScanPaperViewModel(
           onSuccess(paperId)
         },
         onFailure = { error ->
-          // Scanned pages remain preserved in memory so teacher can retry
           _uiState.update {
             it.copy(
               isUploading = false,

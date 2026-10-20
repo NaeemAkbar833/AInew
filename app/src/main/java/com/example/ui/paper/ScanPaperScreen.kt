@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -32,12 +33,15 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DocumentScanner
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -72,6 +76,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -80,15 +85,18 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.model.LocalScannedPage
-import com.example.ui.components.GradeScanPrimaryButton
 import com.example.ui.components.GradeScanProgressDialog
-import com.example.ui.paper.components.SourcePickerBottomSheet
+import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
+import com.example.ui.theme.DarkRoyalBlue
+import com.example.ui.theme.FigtreeFontFamily
+import com.example.ui.theme.HeaderBlueGradient
 import com.example.ui.theme.LightBlueHighlight
+import com.example.ui.theme.PrimaryBlue
 import com.example.ui.theme.RoyalBlue
 import com.example.ui.theme.StatusSuccess
 import com.example.ui.theme.StatusSuccessContainer
-import com.example.ui.theme.StatusWarning
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import java.io.File
@@ -114,8 +122,11 @@ fun ScanPaperScreen(
   val snackbarHostState = remember { SnackbarHostState() }
   val coroutineScope = rememberCoroutineScope()
 
-  var showSourcePicker by remember { mutableStateOf(false) }
   var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+  LaunchedEffect(studentId) {
+    viewModel.loadStudentInfo(studentId)
+  }
 
   // Show upload errors in snackbar
   LaunchedEffect(uiState.uploadError) {
@@ -170,139 +181,278 @@ fun ScanPaperScreen(
     }
   }
 
-  Scaffold(
-    topBar = {
-      com.example.ui.components.GradeScanStitchHeader(
-        title = "Scan Answer Sheet",
-        subtitle = "Capture or select pages in order",
-        badgeText = "MULTI-PAGE SCANNER",
-        onBackClick = {
-          if (!uiState.isUploading) {
-            onNavigateBack()
-          }
-        },
-        backTestTag = "scan_paper_back_button",
-        actions = {
-          if (uiState.pages.isNotEmpty()) {
-            Surface(
-              shape = RoundedCornerShape(999.dp),
-              color = Color.White.copy(alpha = 0.2f),
-            ) {
-              Text(
-                text = "${uiState.pages.size} ${if (uiState.pages.size == 1) "Page" else "Pages"}",
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-              )
-            }
-          }
-        },
+  // Direct handlers for Camera and Gallery actions
+  val onTakeCameraPhoto: () -> Unit = {
+    val hasCameraPermission = ContextCompat.checkSelfPermission(
+      context,
+      Manifest.permission.CAMERA,
+    ) == PackageManager.PERMISSION_GRANTED
+    if (hasCameraPermission) {
+      launchCameraCapture()
+    } else {
+      cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+  }
+
+  val onChooseFromGallery: () -> Unit = {
+    val pickRequest = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+    addMultipleGalleryLauncher.launch(pickRequest)
+  }
+
+  val topHeaderBlendGradient = remember {
+    Brush.verticalGradient(
+      colorStops = arrayOf(
+        0.00f to DarkRoyalBlue,
+        0.36f to PrimaryBlue,
+        0.58f to Color(0xFF3358DF),
+        0.76f to Color(0xFF6E8CEF),
+        0.90f to Color(0xFFC2D3FA),
+        1.00f to BackgroundLight,
       )
-    },
-    snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-    bottomBar = {
-      if (uiState.pages.isNotEmpty()) {
-        val progressText = uiState.uploadProgress?.let { (cur, total) ->
-          "Uploading $cur/$total..."
-        }
-        BottomScanActionBar(
-          pageCount = uiState.pages.size,
-          isUploading = uiState.isUploading,
-          uploadProgressText = progressText,
-          onAddPageClick = { showSourcePicker = true },
-          onSaveClick = {
-            viewModel.finishScan(
-              context = context,
-              studentId = studentId,
-              classId = classId,
-              onSuccess = onScanFinished,
-            )
-          },
-        )
-      }
-    },
-    containerColor = com.example.ui.theme.BackgroundLight,
-    modifier = modifier.testTag("scan_paper_screen"),
-  ) { innerPadding ->
+    )
+  }
+
+  Box(
+    modifier = modifier
+      .fillMaxSize()
+      .background(BackgroundLight)
+      .testTag("scan_paper_screen"),
+  ) {
+    // Backdrop gradient layer extending behind topBar down into upper content area
     Box(
       modifier = Modifier
-        .fillMaxSize()
-        .background(com.example.ui.theme.BackgroundLight)
-        .padding(innerPadding),
-      contentAlignment = Alignment.TopCenter,
-    ) {
-      Column(
-        modifier = Modifier
-          .fillMaxSize()
-          .widthIn(max = 600.dp),
-      ) {
-        if (uiState.pages.isEmpty()) {
-          // Empty state with clear instructions
-          Column(
-            modifier = Modifier
-              .fillMaxSize()
-              .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-          ) {
-            InstructionBanner()
+        .fillMaxWidth()
+        .height(240.dp)
+        .background(topHeaderBlendGradient),
+    )
 
-            Box(
+    Scaffold(
+      containerColor = Color.Transparent,
+      topBar = {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+            .background(HeaderBlueGradient)
+            .statusBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 4.dp)
+            .testTag("top_app_bar"),
+        ) {
+          Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color.White.copy(alpha = 0.16f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Row(
               modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
-              contentAlignment = Alignment.Center,
+                .padding(horizontal = 6.dp, vertical = 3.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-              EmptyPagesState(
-                onAddFirstPage = { showSourcePicker = true }
-              )
-            }
-          }
-        } else {
-          // Multi-page preview grid
-          LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 148.dp),
-            contentPadding = PaddingValues(
-              start = 16.dp,
-              end = 16.dp,
-              top = 14.dp,
-              bottom = 24.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier
-              .fillMaxSize()
-              .testTag("scan_pages_grid"),
-          ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-              InstructionBanner()
-            }
+              Box(
+                modifier = Modifier
+                  .size(48.dp)
+                  .clickable(
+                    role = Role.Button,
+                    onClick = {
+                      if (!uiState.isUploading) {
+                        onNavigateBack()
+                      }
+                    },
+                  )
+                  .testTag("scan_paper_back_button"),
+                contentAlignment = Alignment.Center,
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.20f))
+                    .border(
+                      width = 1.dp,
+                      color = Color.White.copy(alpha = 0.30f),
+                      shape = CircleShape,
+                    ),
+                  contentAlignment = Alignment.Center,
+                ) {
+                  Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
+                  )
+                }
+              }
 
-            items(
-              items = uiState.pages,
-              key = { it.id },
-            ) { page ->
-              ScannedPageCard(
-                page = page,
-                isUploading = uiState.isUploading,
-                onPreview = { viewModel.setPreviewPageUri(page.uri) },
-                onRemove = { viewModel.removePage(page.id) },
-              )
+              Column(
+                modifier = Modifier
+                  .weight(1f)
+                  .padding(horizontal = 4.dp, vertical = 4.dp),
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.Center,
+              ) {
+                Text(
+                  text = "Scan Answer Sheet",
+                  fontFamily = BricolageGrotesqueFontFamily,
+                  fontWeight = FontWeight.Bold,
+                  fontSize = 19.sp,
+                  color = Color.White,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                  text = "Capture or select pages in order",
+                  fontFamily = FigtreeFontFamily,
+                  fontWeight = FontWeight.Normal,
+                  fontSize = 12.sp,
+                  color = Color.White.copy(alpha = 0.85f),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                )
+              }
+
+              if (uiState.pages.isNotEmpty()) {
+                Surface(
+                  shape = RoundedCornerShape(999.dp),
+                  color = Color.White.copy(alpha = 0.2f),
+                  border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
+                  modifier = Modifier.padding(end = 6.dp),
+                ) {
+                  Text(
+                    text = "${uiState.pages.size} ${if (uiState.pages.size == 1) "Page" else "Pages"}",
+                    fontSize = 11.5.sp,
+                    fontFamily = FigtreeFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                  )
+                }
+              }
             }
           }
         }
-      }
+      },
+      snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+      bottomBar = {
+        if (uiState.pages.isNotEmpty()) {
+          val progressText = uiState.uploadProgress?.let { (cur, total) ->
+            "Uploading $cur/$total..."
+          }
+          BottomScanActionBar(
+            pageCount = uiState.pages.size,
+            isUploading = uiState.isUploading,
+            uploadProgressText = progressText,
+            onTakePhotoClick = onTakeCameraPhoto,
+            onChooseGalleryClick = onChooseFromGallery,
+            onSaveClick = {
+              viewModel.finishScan(
+                context = context,
+                studentId = studentId,
+                classId = classId,
+                onSuccess = onScanFinished,
+              )
+            },
+          )
+        }
+      },
+    ) { innerPadding ->
+      Box(
+        modifier = Modifier
+          .fillMaxSize()
+          .padding(innerPadding),
+        contentAlignment = Alignment.TopCenter,
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxSize()
+            .widthIn(max = 600.dp),
+        ) {
+          if (uiState.pages.isEmpty()) {
+            // Empty state with clear context and two direct actions
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+              verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+              if (!uiState.studentName.isNullOrBlank()) {
+                StudentContextBanner(
+                  studentName = uiState.studentName!!,
+                  rollNumber = uiState.studentRollNumber,
+                )
+              }
 
-      // Upload progress dialog
-      if (uiState.isUploading) {
-        val progressSubtitle = uiState.uploadProgress?.let { (cur, total) ->
-          "Uploading page $cur of $total to cloud storage..."
-        } ?: "Saving answer sheet pages to cloud storage..."
+              InstructionBanner()
 
-        GradeScanProgressDialog(
-          title = "Uploading Answer Sheet",
-          subtitle = progressSubtitle,
-        )
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .weight(1f),
+                contentAlignment = Alignment.Center,
+              ) {
+                EmptyPagesState(
+                  onTakePhoto = onTakeCameraPhoto,
+                  onChooseGallery = onChooseFromGallery,
+                )
+              }
+            }
+          } else {
+            // Multi-page preview grid
+            LazyVerticalGrid(
+              columns = GridCells.Adaptive(minSize = 148.dp),
+              contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 14.dp,
+                bottom = 24.dp,
+              ),
+              horizontalArrangement = Arrangement.spacedBy(12.dp),
+              verticalArrangement = Arrangement.spacedBy(12.dp),
+              modifier = Modifier
+                .fillMaxSize()
+                .testTag("scan_pages_grid"),
+            ) {
+              if (!uiState.studentName.isNullOrBlank()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                  StudentContextBanner(
+                    studentName = uiState.studentName!!,
+                    rollNumber = uiState.studentRollNumber,
+                  )
+                }
+              }
+
+              item(span = { GridItemSpan(maxLineSpan) }) {
+                InstructionBanner()
+              }
+
+              items(
+                items = uiState.pages,
+                key = { it.id },
+              ) { page ->
+                ScannedPageCard(
+                  page = page,
+                  isUploading = uiState.isUploading,
+                  onPreview = { viewModel.setPreviewPageUri(page.uri) },
+                  onRemove = { viewModel.removePage(page.id) },
+                )
+              }
+            }
+          }
+        }
+
+        // Upload progress dialog
+        if (uiState.isUploading) {
+          val progressSubtitle = uiState.uploadProgress?.let { (cur, total) ->
+            "Uploading page $cur of $total to cloud storage..."
+          } ?: "Saving answer sheet pages to cloud storage..."
+
+          GradeScanProgressDialog(
+            title = "Uploading Answer Sheet",
+            subtitle = progressSubtitle,
+          )
+        }
       }
     }
   }
@@ -314,31 +464,61 @@ fun ScanPaperScreen(
       onDismiss = { viewModel.setPreviewPageUri(null) },
     )
   }
+}
 
-  // Camera / Gallery Source Picker Bottom Sheet
-  if (showSourcePicker) {
-    SourcePickerBottomSheet(
-      title = "Add Page ${uiState.pages.size + 1}",
-      subtitle = "Capture with camera or select from your gallery",
-      onDismiss = { showSourcePicker = false },
-      onCameraClick = {
-        showSourcePicker = false
-        val hasCameraPermission = ContextCompat.checkSelfPermission(
-          context,
-          Manifest.permission.CAMERA,
-        ) == PackageManager.PERMISSION_GRANTED
-        if (hasCameraPermission) {
-          launchCameraCapture()
-        } else {
-          cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+@Composable
+private fun StudentContextBanner(
+  studentName: String,
+  rollNumber: String?,
+) {
+  Card(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(12.dp),
+    colors = CardDefaults.cardColors(containerColor = Color.White),
+    border = BorderStroke(1.dp, BorderGray),
+    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 12.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Box(
+        modifier = Modifier
+          .size(36.dp)
+          .clip(RoundedCornerShape(10.dp))
+          .background(LightBlueHighlight)
+          .border(1.dp, RoyalBlue.copy(alpha = 0.2f), RoundedCornerShape(10.dp)),
+        contentAlignment = Alignment.Center,
+      ) {
+        Icon(
+          imageVector = Icons.Default.Person,
+          contentDescription = null,
+          tint = RoyalBlue,
+          modifier = Modifier.size(18.dp),
+        )
+      }
+
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = "Scanning for $studentName",
+          fontFamily = BricolageGrotesqueFontFamily,
+          fontSize = 14.sp,
+          fontWeight = FontWeight.Bold,
+          color = TextPrimary,
+        )
+        if (!rollNumber.isNullOrBlank()) {
+          Text(
+            text = "Roll No: $rollNumber",
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.sp,
+            color = TextSecondary,
+          )
         }
-      },
-      onGalleryClick = {
-        showSourcePicker = false
-        val pickRequest = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-        addMultipleGalleryLauncher.launch(pickRequest)
-      },
-    )
+      }
+    }
   }
 }
 
@@ -377,6 +557,7 @@ private fun InstructionBanner() {
       Column(modifier = Modifier.weight(1f)) {
         Text(
           text = "Multi-Page Capture",
+          fontFamily = BricolageGrotesqueFontFamily,
           fontSize = 13.5.sp,
           fontWeight = FontWeight.Bold,
           color = TextPrimary,
@@ -384,6 +565,7 @@ private fun InstructionBanner() {
         Spacer(modifier = Modifier.height(2.dp))
         Text(
           text = "Add pages in sequence (Page 1, Page 2, etc.). Ensure handwriting is clear and well-lit for accurate OCR.",
+          fontFamily = FigtreeFontFamily,
           fontSize = 12.sp,
           lineHeight = 16.sp,
           color = TextSecondary,
@@ -395,7 +577,8 @@ private fun InstructionBanner() {
 
 @Composable
 private fun EmptyPagesState(
-  onAddFirstPage: () -> Unit,
+  onTakePhoto: () -> Unit,
+  onChooseGallery: () -> Unit,
 ) {
   Card(
     modifier = Modifier.fillMaxWidth(),
@@ -407,7 +590,7 @@ private fun EmptyPagesState(
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 20.dp, vertical = 26.dp),
+        .padding(horizontal = 20.dp, vertical = 24.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
       Box(
@@ -418,7 +601,7 @@ private fun EmptyPagesState(
         contentAlignment = Alignment.Center,
       ) {
         Icon(
-          imageVector = Icons.Default.AddAPhoto,
+          imageVector = Icons.Default.DocumentScanner,
           contentDescription = null,
           tint = RoyalBlue,
           modifier = Modifier.size(22.dp),
@@ -429,7 +612,8 @@ private fun EmptyPagesState(
 
       Text(
         text = "No Pages Added Yet",
-        fontSize = 15.5.sp,
+        fontFamily = BricolageGrotesqueFontFamily,
+        fontSize = 16.sp,
         fontWeight = FontWeight.Bold,
         color = TextPrimary,
         textAlign = TextAlign.Center,
@@ -438,21 +622,82 @@ private fun EmptyPagesState(
       Spacer(modifier = Modifier.height(4.dp))
 
       Text(
-        text = "Capture Page 1 of the student's handwritten answer sheet using your camera or select photos from your gallery.",
+        text = "Choose how to add Page 1 of the handwritten answer sheet below:",
+        fontFamily = FigtreeFontFamily,
         fontSize = 12.5.sp,
         lineHeight = 17.5.sp,
         color = TextSecondary,
         textAlign = TextAlign.Center,
       )
 
-      Spacer(modifier = Modifier.height(18.dp))
+      Spacer(modifier = Modifier.height(20.dp))
 
-      GradeScanPrimaryButton(
-        text = "Add First Page",
-        onClick = onAddFirstPage,
-        icon = Icons.Default.AddAPhoto,
-        testTag = "empty_add_page_button",
-      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Button(
+          onClick = onTakePhoto,
+          shape = RoundedCornerShape(10.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = RoyalBlue,
+            contentColor = Color.White,
+          ),
+          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+          modifier = Modifier
+            .weight(1f)
+            .height(46.dp)
+            .testTag("empty_take_photo_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Default.AddAPhoto,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+          )
+          Spacer(modifier = Modifier.width(5.dp))
+          Text(
+            text = "Take Photo",
+            fontFamily = BricolageGrotesqueFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+          )
+        }
+
+        OutlinedButton(
+          onClick = onChooseGallery,
+          shape = RoundedCornerShape(10.dp),
+          border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.5f)),
+          colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = Color.White,
+            contentColor = RoyalBlue,
+          ),
+          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+          modifier = Modifier
+            .weight(1f)
+            .height(46.dp)
+            .testTag("empty_choose_gallery_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Default.PhotoLibrary,
+            contentDescription = null,
+            tint = RoyalBlue,
+            modifier = Modifier.size(16.dp),
+          )
+          Spacer(modifier = Modifier.width(4.dp))
+          Text(
+            text = "From Gallery",
+            fontFamily = BricolageGrotesqueFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = RoyalBlue,
+            maxLines = 1,
+            softWrap = false,
+          )
+        }
+      }
     }
   }
 }
@@ -514,6 +759,7 @@ private fun ScannedPageCard(
           Text(
             text = "Page ${page.pageNumber}",
             fontSize = 11.sp,
+            fontFamily = FigtreeFontFamily,
             fontWeight = FontWeight.Bold,
             color = Color.White,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -584,58 +830,38 @@ private fun ScannedPageCard(
         }
       }
 
-      // Bottom strip
-      Row(
+      // Bottom strip - Display only compact green "Ready" status label
+      Box(
         modifier = Modifier
           .fillMaxWidth()
           .background(Color.White)
-          .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+          .padding(horizontal = 8.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center,
       ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        Surface(
+          shape = RoundedCornerShape(6.dp),
+          color = StatusSuccessContainer,
         ) {
-          Text(
-            text = "Page ${page.pageNumber}",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary,
-          )
-
-          Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = StatusSuccessContainer,
+          Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
           ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-              Icon(
-                imageVector = Icons.Default.CheckCircle,
-                contentDescription = null,
-                tint = StatusSuccess,
-                modifier = Modifier.size(10.dp),
-              )
-              Text(
-                text = "Ready",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = StatusSuccess,
-              )
-            }
+            Icon(
+              imageVector = Icons.Default.CheckCircle,
+              contentDescription = null,
+              tint = StatusSuccess,
+              modifier = Modifier.size(11.dp),
+            )
+            Text(
+              text = "Ready",
+              fontSize = 11.sp,
+              fontFamily = FigtreeFontFamily,
+              fontWeight = FontWeight.Bold,
+              color = StatusSuccess,
+            )
           }
         }
-
-        Text(
-          text = "Tap to view",
-          fontSize = 11.sp,
-          color = RoyalBlue,
-          fontWeight = FontWeight.SemiBold,
-          modifier = Modifier.clickable(enabled = !isUploading, onClick = onPreview),
-        )
       }
     }
   }
@@ -669,6 +895,7 @@ private fun ScannedPagePreviewDialog(
         ) {
           Text(
             text = "Page Preview",
+            fontFamily = BricolageGrotesqueFontFamily,
             fontSize = 15.5.sp,
             fontWeight = FontWeight.Bold,
             color = TextPrimary,
@@ -720,7 +947,8 @@ private fun BottomScanActionBar(
   pageCount: Int,
   isUploading: Boolean,
   uploadProgressText: String?,
-  onAddPageClick: () -> Unit,
+  onTakePhotoClick: () -> Unit,
+  onChooseGalleryClick: () -> Unit,
   onSaveClick: () -> Unit,
 ) {
   Surface(
@@ -729,94 +957,133 @@ private fun BottomScanActionBar(
     shadowElevation = 6.dp,
     tonalElevation = 0.dp,
   ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-      HorizontalDivider(thickness = 1.dp, color = BorderGray)
-      Box(
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+      Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 16.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center,
+          .widthIn(max = 600.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
       ) {
-        Row(
+        OutlinedButton(
+          onClick = onTakePhotoClick,
+          enabled = !isUploading,
+          shape = RoundedCornerShape(10.dp),
+          border = BorderStroke(1.dp, BorderGray),
+          colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = LightBlueHighlight,
+            contentColor = RoyalBlue,
+          ),
+          contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
           modifier = Modifier
-            .fillMaxWidth()
-            .widthIn(max = 600.dp),
-          horizontalArrangement = Arrangement.spacedBy(10.dp),
-          verticalAlignment = Alignment.CenterVertically,
+            .weight(1f)
+            .height(44.dp)
+            .testTag("take_photo_button"),
         ) {
-          OutlinedButton(
-            onClick = onAddPageClick,
-            enabled = !isUploading,
-            shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(1.dp, BorderGray),
-            colors = ButtonDefaults.outlinedButtonColors(
-              containerColor = Color.White,
-              contentColor = RoyalBlue,
-            ),
-            modifier = Modifier
-              .weight(1f)
-              .height(46.dp)
-              .testTag("add_page_button"),
-          ) {
-            Icon(
-              imageVector = Icons.Default.AddAPhoto,
-              contentDescription = null,
-              tint = RoyalBlue,
-              modifier = Modifier.size(16.dp),
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-              text = "Add Page",
-              fontSize = 13.sp,
-              fontWeight = FontWeight.Bold,
-              color = RoyalBlue,
-            )
-          }
+          Icon(
+            imageVector = Icons.Default.AddAPhoto,
+            contentDescription = null,
+            tint = RoyalBlue,
+            modifier = Modifier.size(14.dp),
+          )
+          Spacer(modifier = Modifier.width(3.dp))
+          Text(
+            text = "Camera",
+            fontFamily = BricolageGrotesqueFontFamily,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = RoyalBlue,
+            maxLines = 1,
+            softWrap = false,
+          )
+        }
 
-          Button(
-            onClick = onSaveClick,
-            enabled = !isUploading && pageCount > 0,
-            shape = RoundedCornerShape(10.dp),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = RoyalBlue,
-              contentColor = Color.White,
-              disabledContainerColor = BorderGray,
-              disabledContentColor = TextSecondary,
-            ),
-            modifier = Modifier
-              .weight(1.35f)
-              .height(46.dp)
-              .testTag("save_paper_button"),
-          ) {
-            if (isUploading) {
-              CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp,
-                color = Color.White,
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = uploadProgressText ?: "Uploading...",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                maxLines = 1,
-              )
-            } else {
-              Icon(
-                imageVector = Icons.Default.CloudUpload,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(16.dp),
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = "Save Sheet ($pageCount)",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-              )
-            }
+        OutlinedButton(
+          onClick = onChooseGalleryClick,
+          enabled = !isUploading,
+          shape = RoundedCornerShape(10.dp),
+          border = BorderStroke(1.dp, BorderGray),
+          colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = LightBlueHighlight,
+            contentColor = RoyalBlue,
+          ),
+          contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+          modifier = Modifier
+            .weight(1f)
+            .height(44.dp)
+            .testTag("choose_gallery_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Default.PhotoLibrary,
+            contentDescription = null,
+            tint = RoyalBlue,
+            modifier = Modifier.size(14.dp),
+          )
+          Spacer(modifier = Modifier.width(3.dp))
+          Text(
+            text = "Gallery",
+            fontFamily = BricolageGrotesqueFontFamily,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = RoyalBlue,
+            maxLines = 1,
+            softWrap = false,
+          )
+        }
+
+        Button(
+          onClick = onSaveClick,
+          enabled = !isUploading && pageCount > 0,
+          shape = RoundedCornerShape(10.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = RoyalBlue,
+            contentColor = Color.White,
+            disabledContainerColor = BorderGray,
+            disabledContentColor = TextSecondary,
+          ),
+          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+          modifier = Modifier
+            .weight(1.25f)
+            .height(44.dp)
+            .testTag("save_paper_button"),
+        ) {
+          if (isUploading) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(15.dp),
+              strokeWidth = 2.dp,
+              color = Color.White,
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = uploadProgressText ?: "Saving...",
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 11.5.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              maxLines = 1,
+              softWrap = false,
+            )
+          } else {
+            Icon(
+              imageVector = Icons.Default.CloudUpload,
+              contentDescription = null,
+              tint = Color.White,
+              modifier = Modifier.size(15.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = "Save ($pageCount)",
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              maxLines = 1,
+              softWrap = false,
+            )
           }
         }
       }
