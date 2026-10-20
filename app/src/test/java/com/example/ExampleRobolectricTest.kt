@@ -997,4 +997,83 @@ class ExampleRobolectricTest {
     assertEquals("ai_generated", q?.expectedAnswerSource)
     assertEquals("ai_generated", q?.markingCriteriaSource)
   }
+
+  @Test
+  fun studentDetailViewModel_approvedEvaluationIsReadOnlyAndPreservesNavigationState() = runTest {
+    val fakeStudentRepo = FakeStudentRepository()
+    val fakeClassRepo = FakeClassRepository()
+    val fakePaperRepo = FakePaperRepository()
+    val viewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo)
+
+    val approvedJson = """
+      {
+        "status": "approved",
+        "percentageAvailable": true,
+        "evaluation": {
+          "id": "eval-approved-1",
+          "paperId": "paper-approved-1",
+          "studentId": "student-1",
+          "classId": "class-1",
+          "status": "approved",
+          "totalMarksObtained": 18.0,
+          "totalMarks": 20.0,
+          "extractedQuestionTotalMarks": 20.0,
+          "percentage": 90.0,
+          "percentageAvailable": true,
+          "reviewRequired": false,
+          "questions": [
+            {
+              "id": "q-1",
+              "question_number": "1",
+              "question_text": "Explain polymorphism.",
+              "maximum_marks": 10.0,
+              "student_answer": "Ability of objects to take multiple forms.",
+              "expected_answer": "Objects taking multiple forms.",
+              "marking_criteria": "Full marks for clear definition.",
+              "awarded_marks": 9.0,
+              "feedback": "Well explained.",
+              "review_required": false
+            }
+          ]
+        }
+      }
+    """.trimIndent()
+
+    val parsedApproved = com.example.data.model.parseAiEvaluationResponse(
+      approvedJson,
+      fallbackPaperId = "paper-approved-1",
+    )
+    assertNotNull(parsedApproved)
+
+    viewModel.setEvaluationResultForTesting("paper-approved-1", parsedApproved)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.status)
+    assertNull(viewModel.uiState.value.editedQuestions)
+
+    // Attempting to update marks or feedback on an approved evaluation must be ignored
+    viewModel.onUpdateQuestion(
+      questionId = "q-1",
+      questionNumber = "1",
+      awardedMarks = 2.0,
+      feedback = "Tampered feedback",
+    )
+    assertNull(viewModel.uiState.value.editedQuestions)
+    assertEquals(
+      9.0,
+      viewModel.uiState.value.evaluationResult?.evaluation?.questions?.firstOrNull()?.awardedMarks,
+    )
+
+    // Re-opening approved evaluation preserves loaded approved state without triggering AI evaluation
+    viewModel.openApprovedEvaluation("paper-approved-1")
+    assertNull(viewModel.uiState.value.isEvaluatingPaperId)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+
+    // Calling runAiEvaluation on an already-approved paper sets one-shot navigation and does not re-grade
+    viewModel.runAiEvaluation("paper-approved-1")
+    assertEquals("paper-approved-1", viewModel.uiState.value.pendingReviewNavigationPaperId)
+    assertNull(viewModel.uiState.value.isEvaluatingPaperId)
+
+    // Consuming navigation clears the pending paper ID so back navigation does not re-open TeacherReview
+    viewModel.consumeReviewNavigation()
+    assertNull(viewModel.uiState.value.pendingReviewNavigationPaperId)
+  }
 }

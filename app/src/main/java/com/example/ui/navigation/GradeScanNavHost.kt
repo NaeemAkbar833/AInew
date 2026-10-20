@@ -53,6 +53,7 @@ import com.example.ui.paper.ScanPaperScreen
 import com.example.ui.paper.ScanPaperViewModel
 import com.example.ui.paper.StudentDetailScreen
 import com.example.ui.paper.StudentDetailViewModel
+import com.example.ui.paper.TeacherReviewScreen
 import com.example.ui.splash.SplashScreen
 import com.example.ui.student.ClassDetailScreen
 import com.example.ui.student.StudentViewModel
@@ -388,6 +389,12 @@ fun GradeScanNavHost(
           onNavigateToScan = { sid, cid ->
             navController.navigate(Screen.ScanPaper.createRoute(sid, cid))
           },
+          onNavigateToTeacherReview = { sid, pid ->
+            studentDetailViewModel.consumeReviewNavigation()
+            navController.navigate(Screen.TeacherReview.createRoute(sid, pid)) {
+              launchSingleTop = true
+            }
+          },
         )
       }
 
@@ -417,6 +424,36 @@ fun GradeScanNavHost(
               vm.loadStudentAndPapers(studentId)
             }
             navController.popBackStack()
+          },
+        )
+      }
+
+      composable(
+        route = Screen.TeacherReview.route,
+        arguments = listOf(
+          navArgument("studentId") { type = NavType.StringType },
+          navArgument("paperId") { type = NavType.StringType },
+        ),
+      ) { backStackEntry ->
+        val studentId = backStackEntry.arguments?.getString("studentId") ?: ""
+        val paperId = backStackEntry.arguments?.getString("paperId") ?: ""
+
+        val studentDetailEntry = remember(backStackEntry) {
+          runCatching { navController.getBackStackEntry(Screen.StudentDetail.route) }.getOrNull()
+            ?: navController.previousBackStackEntry
+        }
+        val studentDetailViewModel: StudentDetailViewModel = studentDetailEntry?.let { viewModel(it) }
+          ?: viewModel { StudentDetailViewModel(studentRepository, classRepository, paperRepository, ocrRepository) }
+
+        TeacherReviewScreen(
+          studentId = studentId,
+          paperId = paperId,
+          viewModel = studentDetailViewModel,
+          onNavigateBack = {
+            studentDetailViewModel.consumeReviewNavigation()
+            if (!navController.popBackStack(Screen.StudentDetail.route, inclusive = false)) {
+              navController.popBackStack()
+            }
           },
         )
       }

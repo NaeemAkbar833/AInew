@@ -32,4 +32,7 @@ sealed class Screen(val route: String) {
   data object ScanPaper : Screen("scan_paper/{studentId}/{classId}") {
     fun createRoute(studentId: String, classId: String) = "scan_paper/$studentId/$classId"
   }
+  data object TeacherReview : Screen("teacher_review/{studentId}/{paperId}") {
+    fun createRoute(studentId: String, paperId: String) = "teacher_review/$studentId/$paperId"
+  }
 }

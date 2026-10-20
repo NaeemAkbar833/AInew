@@ -8,6 +8,7 @@ import com.example.data.model.EvaluationDbRecord
 import com.example.data.model.QuestionDbRecord
 import com.example.data.model.EvaluationDetail
 import com.example.data.model.EvaluationQuestion
+import com.example.data.model.EvaluationStatus
 import com.example.data.model.AiEvaluationResponse
 import com.example.data.model.ClassRoom
 import com.example.data.model.Student
@@ -62,6 +63,7 @@ data class StudentDetailUiState(
   val saveCorrectionsSuccess: Boolean = false,
   val saveCorrectionsError: String? = null,
   val editedQuestions: List<EvaluationQuestion>? = null,
+  val pendingReviewNavigationPaperId: String? = null,
 )
 
 class StudentDetailViewModel(
@@ -296,9 +298,119 @@ class StudentDetailViewModel(
       }
     }
 
+  fun consumeReviewNavigation() {
+    _uiState.update { it.copy(pendingReviewNavigationPaperId = null) }
+  }
+
+  internal fun setEvaluationResultForTesting(paperId: String, response: AiEvaluationResponse?) {
+    _uiState.update {
+      it.copy(
+        evaluatedPaperId = paperId,
+        evaluationResult = response,
+        editedQuestions = null,
+      )
+    }
+  }
+
+  fun openApprovedEvaluation(paperId: String) {
+    if (paperId.isBlank()) return
+    val currentState = _uiState.value
+    val currentEval = currentState.evaluationResult?.evaluation
+    val isAlreadyLoadedApproved = currentState.evaluatedPaperId == paperId &&
+      currentEval != null &&
+      (currentEval.status.equals("approved", ignoreCase = true) ||
+        currentState.evaluationResult.status.equals("approved", ignoreCase = true))
+
+    if (isAlreadyLoadedApproved) {
+      _uiState.update {
+        it.copy(
+          isEvaluatingPaperId = null,
+          evaluationError = null,
+          editedQuestions = null,
+          feedbackMessage = null,
+        )
+      }
+      return
+    }
+
+    evaluationJob?.cancel()
+    evaluationJob = viewModelScope.launch {
+      _uiState.update {
+        it.copy(
+          isEvaluatingPaperId = paperId,
+          evaluatedPaperId = paperId,
+          evaluationResult = if (it.evaluatedPaperId == paperId) it.evaluationResult else null,
+          evaluationResultJson = null,
+          evaluationError = null,
+          editedQuestions = null,
+          feedbackMessage = null,
+        )
+      }
+
+      val existingEval = loadExistingEvaluationForPaper(paperId)
+      if (existingEval != null && existingEval.evaluation != null) {
+        val approvedDetail = existingEval.evaluation.copy(
+          status = "approved",
+          reviewRequired = false,
+        )
+        val approvedResponse = existingEval.copy(
+          status = "approved",
+          evaluation = approvedDetail,
+        )
+        _uiState.update {
+          it.copy(
+            isEvaluatingPaperId = null,
+            evaluatedPaperId = paperId,
+            evaluationResult = approvedResponse,
+            evaluationResultJson = null,
+            evaluationError = null,
+            editedQuestions = null,
+            feedbackMessage = null,
+          )
+        }
+      } else {
+        _uiState.update {
+          it.copy(
+            isEvaluatingPaperId = null,
+            evaluationError = "Unable to load the saved approved evaluation.",
+          )
+        }
+      }
+    }
+  }
+
   fun runAiEvaluation(paperId: String) {
     if (paperId.isBlank()) return
     if (_uiState.value.isEvaluatingPaperId == paperId) return
+
+    val currentState = _uiState.value
+    val knownPaper = currentState.papers.find { it.id == paperId }
+    val isKnownApproved = knownPaper?.status.equals("approved", ignoreCase = true) ||
+      knownPaper?.evaluation?.status.equals("approved", ignoreCase = true) ||
+      (currentState.evaluatedPaperId == paperId && (
+        currentState.evaluationResult?.status.equals("approved", ignoreCase = true) ||
+          currentState.evaluationResult?.evaluation?.status.equals("approved", ignoreCase = true)
+        ))
+
+    if (isKnownApproved) {
+      openApprovedEvaluation(paperId)
+      _uiState.update { it.copy(pendingReviewNavigationPaperId = paperId) }
+      return
+    }
+
+    // Preserve in-memory evaluation and unsaved teacher edits if already loaded for this paper
+    if (currentState.evaluatedPaperId == paperId &&
+      currentState.evaluationResult?.evaluation != null &&
+      currentState.evaluationError == null
+    ) {
+      _uiState.update {
+        it.copy(
+          isEvaluatingPaperId = null,
+          pendingReviewNavigationPaperId = paperId,
+        )
+      }
+      return
+    }
 
     evaluationJob?.cancel()
     evaluationJob = viewModelScope.launch {
@@ -314,21 +426,21 @@ class StudentDetailViewModel(
       // 1. Check if an evaluation already exists in database for this paper
       val existingEval = loadExistingEvaluationForPaper(paperId)
       if (existingEval != null && existingEval.evaluation != null) {
-        val evalStatus = existingEval.evaluation.status
-        if (evalStatus == "approved" || evalStatus == "completed" || evalStatus == "needs_review") {
+        val evalStatus = existingEval.evaluation.status.orEmpty()
+        if (evalStatus.equals("approved", ignoreCase = true) ||
+          evalStatus.equals("completed", ignoreCase = true) ||
+          evalStatus.equals("needs_review", ignoreCase = true)
+        ) {
           Log.i("StudentDetailViewModel", "Found existing evaluation for paper $paperId with status $evalStatus. Skipping AI grading pipeline.")
-          val msg = if (evalStatus == "approved") {
-            "Loaded existing approved evaluation."
-          } else {
-            "Loaded existing evaluation."
-          }
           _uiState.update {
             it.copy(
               isEvaluatingPaperId = null,
+              evaluatedPaperId = paperId,
               evaluationResult = existingEval,
               evaluationResultJson = null,
               evaluationError = null,
-              feedbackMessage = msg,
+              editedQuestions = if (evalStatus.equals("approved", ignoreCase = true)) null else it.editedQuestions,
+              pendingReviewNavigationPaperId = paperId,
             )
           }
           return@launch
@@ -391,9 +503,12 @@ class StudentDetailViewModel(
           _uiState.update {
             it.copy(
               isEvaluatingPaperId = null,
+              evaluatedPaperId = paperId,
               evaluationResult = if (!isFailedStatus) parsedResponse else null,
               evaluationResultJson = jsonText,
               evaluationError = errorText,
+              editedQuestions = null,
+              pendingReviewNavigationPaperId = if (!isFailedStatus && parsedResponse != null) paperId else null,
             )
           }
 
@@ -414,10 +529,12 @@ class StudentDetailViewModel(
               _uiState.update {
                 it.copy(
                   isEvaluatingPaperId = null,
+                  evaluatedPaperId = paperId,
                   evaluationResult = fallbackEval,
                   evaluationResultJson = null,
                   evaluationError = null,
-                  feedbackMessage = "This paper has already been approved. Loading the saved result...",
+                  editedQuestions = null,
+                  pendingReviewNavigationPaperId = paperId,
                 )
               }
               return@launch
@@ -456,7 +573,9 @@ class StudentDetailViewModel(
     if (evaluationId.isBlank() || paperId.isBlank()) return
 
     val currentEval = _uiState.value.evaluationResult?.evaluation
-    if (currentEval?.status == "approved") {
+    val isAlreadyApprovedState = currentEval?.status.equals("approved", ignoreCase = true) ||
+      _uiState.value.evaluationResult?.status.equals("approved", ignoreCase = true)
+    if (isAlreadyApprovedState) {
       _uiState.update {
         it.copy(feedbackMessage = "This result has already been approved.")
       }
@@ -507,19 +626,37 @@ class StudentDetailViewModel(
       result.fold(
         onSuccess = {
           _uiState.update { state ->
+            val finalizedQuestions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions.orEmpty()
+            val finalizedTotal = if (state.editedQuestions != null) {
+              finalizedQuestions.sumOf { it.awardedMarks ?: 0.0 }
+            } else {
+              state.evaluationResult?.evaluation?.totalMarksObtained
+            }
             val updatedDetail = state.evaluationResult?.evaluation?.copy(
               status = "approved",
               reviewRequired = false,
+              questions = finalizedQuestions,
+              totalMarksObtained = finalizedTotal,
             )
             val updatedResponse = state.evaluationResult?.copy(
               status = "approved",
               evaluation = updatedDetail,
             )
+            val updatedPapers = state.papers.map { paper ->
+              if (paper.id == paperId) {
+                paper.copy(
+                  status = "approved",
+                  evaluation = EvaluationStatus(status = "approved"),
+                )
+              } else paper
+            }
             state.copy(
               isApproving = false,
               approvalSuccess = true,
               approvalError = null,
               evaluationResult = updatedResponse,
+              editedQuestions = null,
+              papers = updatedPapers,
               feedbackMessage = "Result approved and saved successfully.",
             )
           }
@@ -543,11 +680,21 @@ class StudentDetailViewModel(
                 status = "approved",
                 evaluation = updatedDetail,
               )
+              val updatedPapers = state.papers.map { paper ->
+                if (paper.id == paperId) {
+                  paper.copy(
+                    status = "approved",
+                    evaluation = EvaluationStatus(status = "approved"),
+                  )
+                } else paper
+              }
               state.copy(
                 isApproving = false,
                 approvalSuccess = true,
                 approvalError = null,
                 evaluationResult = updatedResponse,
+                editedQuestions = null,
+                papers = updatedPapers,
                 feedbackMessage = "This result has already been approved.",
               )
             }
@@ -596,12 +743,17 @@ class StudentDetailViewModel(
         saveCorrectionsSuccess = false,
         saveCorrectionsError = null,
         editedQuestions = null,
+        pendingReviewNavigationPaperId = null,
       )
     }
   }
 
   fun onUpdateQuestion(questionId: String?, questionNumber: String?, awardedMarks: Double?, feedback: String) {
     _uiState.update { state ->
+      val isApproved = state.evaluationResult?.status.equals("approved", ignoreCase = true) ||
+        state.evaluationResult?.evaluation?.status.equals("approved", ignoreCase = true)
+      if (isApproved) return@update state
+
       val currentQuestions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions ?: return@update state
       val updatedQuestions = currentQuestions.map { q ->
         val isTarget = if (q.id != null && questionId != null) {
@@ -612,7 +764,13 @@ class StudentDetailViewModel(
         }
 
         if (isTarget) {
-          q.copy(awardedMarks = awardedMarks, feedback = feedback)
+          val maxMarks = q.maximumMarks ?: 0.0
+          val coercedMarks = if (awardedMarks != null && maxMarks > 0.0) {
+            awardedMarks.coerceIn(0.0, maxMarks)
+          } else {
+            awardedMarks?.coerceAtLeast(0.0)
+          }
+          q.copy(awardedMarks = coercedMarks, feedback = feedback)
         } else {
           q
         }
@@ -623,6 +781,10 @@ class StudentDetailViewModel(
 
   fun saveTeacherCorrections(evaluationId: String, paperId: String) {
     val state = _uiState.value
+    val isApproved = state.evaluationResult?.status.equals("approved", ignoreCase = true) ||
+      state.evaluationResult?.evaluation?.status.equals("approved", ignoreCase = true)
+    if (isApproved) return
+
     val questions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions ?: return
     val studentId = state.student?.id ?: return
     val classId = state.classRoom?.id ?: return

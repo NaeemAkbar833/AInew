@@ -78,7 +78,9 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.AiEvaluationResponse
 import com.example.data.model.EvaluationQuestion
 import com.example.ui.theme.BorderGray
+import com.example.ui.theme.BricolageGrotesqueFontFamily
 import com.example.ui.theme.DarkRoyalBlue
+import com.example.ui.theme.FigtreeFontFamily
 import com.example.ui.theme.LightBlueHighlight
 import com.example.ui.theme.RoyalBlue
 import com.example.ui.theme.StatusAmber
@@ -237,6 +239,7 @@ fun TeacherReviewDialog(
             ) {
               Text(
                 text = if (isApproved) "Approved Evaluation Result" else "Review & Approve Evaluation",
+                fontFamily = BricolageGrotesqueFontFamily,
                 fontSize = 16.sp,
                 lineHeight = 20.sp,
                 fontWeight = FontWeight.Bold,
@@ -248,6 +251,7 @@ fun TeacherReviewDialog(
               if (studentName.isBlank() && subjectName.isBlank()) {
                 Text(
                   text = "Inspect AI grading, edit marks, and approve",
+                  fontFamily = FigtreeFontFamily,
                   fontSize = 11.5.sp,
                   color = TextSecondary,
                 )
@@ -307,6 +311,7 @@ fun TeacherReviewDialog(
                   if (studentName.isNotBlank()) {
                     Text(
                       text = studentName,
+                      fontFamily = BricolageGrotesqueFontFamily,
                       fontSize = 14.sp,
                       lineHeight = 18.sp,
                       fontWeight = FontWeight.Bold,
@@ -318,6 +323,7 @@ fun TeacherReviewDialog(
                   if (fatherName.isNotBlank()) {
                     Text(
                       text = "Father: $fatherName",
+                      fontFamily = FigtreeFontFamily,
                       fontSize = 11.5.sp,
                       lineHeight = 15.5.sp,
                       color = TextSecondary,
@@ -347,6 +353,7 @@ fun TeacherReviewDialog(
                     )
                     Text(
                       text = badgeText,
+                      fontFamily = FigtreeFontFamily,
                       fontSize = 10.5.sp,
                       fontWeight = FontWeight.Bold,
                       color = badgeFg,
@@ -369,6 +376,7 @@ fun TeacherReviewDialog(
                     ) {
                       Text(
                         text = "Roll No: $studentRollNumber",
+                        fontFamily = FigtreeFontFamily,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = RoyalBlue,
@@ -384,6 +392,7 @@ fun TeacherReviewDialog(
                     ) {
                       Text(
                         text = subjectName,
+                        fontFamily = FigtreeFontFamily,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = TextSecondary,
@@ -495,6 +504,7 @@ fun TeacherReviewDialog(
               Column {
                 Text(
                   text = if (isApproved) "Final Approved Score" else "Total Evaluation Score",
+                  fontFamily = FigtreeFontFamily,
                   fontSize = 11.5.sp,
                   fontWeight = FontWeight.SemiBold,
                   color = TextSecondary,
@@ -505,12 +515,14 @@ fun TeacherReviewDialog(
                 ) {
                   Text(
                     text = formatMarks(liveTotalObtained),
+                    fontFamily = BricolageGrotesqueFontFamily,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = RoyalBlue,
                   )
                   Text(
                     text = "/ ${formatMarks(totalPossible)}",
+                    fontFamily = FigtreeFontFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = TextSecondary,
@@ -537,6 +549,7 @@ fun TeacherReviewDialog(
                   )
                   Text(
                     text = badgeText,
+                    fontFamily = FigtreeFontFamily,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = badgeFg,
@@ -603,12 +616,14 @@ fun TeacherReviewDialog(
               Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                   text = "Teacher Review Recommended",
+                  fontFamily = BricolageGrotesqueFontFamily,
                   fontSize = 12.sp,
                   fontWeight = FontWeight.Bold,
                   color = StatusAmber,
                 )
                 Text(
                   text = evaluation?.reviewReason.orEmpty(),
+                  fontFamily = FigtreeFontFamily,
                   fontSize = 11.5.sp,
                   color = TextPrimary,
                   lineHeight = 16.sp,
@@ -626,6 +641,7 @@ fun TeacherReviewDialog(
         ) {
           Text(
             text = "Question Breakdown (${questions.size})",
+            fontFamily = BricolageGrotesqueFontFamily,
             fontSize = 13.5.sp,
             fontWeight = FontWeight.Bold,
             color = TextPrimary,
@@ -633,6 +649,7 @@ fun TeacherReviewDialog(
           if (!isApproved) {
             Text(
               text = "Tap Edit to adjust marks",
+              fontFamily = FigtreeFontFamily,
               fontSize = 11.sp,
               fontWeight = FontWeight.Medium,
               color = RoyalBlue,
@@ -715,6 +732,7 @@ fun TeacherReviewDialog(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                   text = "Saving Corrections...",
+                  fontFamily = BricolageGrotesqueFontFamily,
                   fontSize = 12.5.sp,
                   fontWeight = FontWeight.Bold,
                   color = RoyalBlue,
@@ -729,6 +747,7 @@ fun TeacherReviewDialog(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                   text = "Save Edited Marks & Feedback",
+                  fontFamily = BricolageGrotesqueFontFamily,
                   fontSize = 12.5.sp,
                   fontWeight = FontWeight.Bold,
                   color = RoyalBlue,
@@ -759,6 +778,7 @@ fun TeacherReviewDialog(
             ) {
               Text(
                 text = if (isApproved) "Close" else "Cancel",
+                fontFamily = BricolageGrotesqueFontFamily,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary,
@@ -801,6 +821,7 @@ fun TeacherReviewDialog(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                       text = "Approving...",
+                      fontFamily = BricolageGrotesqueFontFamily,
                       fontSize = 13.5.sp,
                       fontWeight = FontWeight.SemiBold,
                       color = Color.White,
@@ -815,6 +836,7 @@ fun TeacherReviewDialog(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                       text = "Approve & Finalize",
+                      fontFamily = BricolageGrotesqueFontFamily,
                       fontSize = 13.5.sp,
                       fontWeight = FontWeight.SemiBold,
                       color = Color.White,
@@ -855,12 +877,14 @@ private fun MetricChip(
     ) {
       Text(
         text = label,
+        fontFamily = FigtreeFontFamily,
         fontSize = 10.5.sp,
         fontWeight = FontWeight.Medium,
         color = TextSecondary,
       )
       Text(
         text = value,
+        fontFamily = BricolageGrotesqueFontFamily,
         fontSize = 13.sp,
         fontWeight = FontWeight.Bold,
         color = TextPrimary,
@@ -941,6 +965,7 @@ private fun QuestionReviewCard(
           ) {
             Text(
               text = "Q$qLabel",
+              fontFamily = FigtreeFontFamily,
               fontSize = 11.5.sp,
               fontWeight = FontWeight.Bold,
               color = Color.White,
@@ -967,6 +992,7 @@ private fun QuestionReviewCard(
                 )
                 Text(
                   text = "Review Needed",
+                  fontFamily = FigtreeFontFamily,
                   fontSize = 10.5.sp,
                   fontWeight = FontWeight.SemiBold,
                   color = StatusAmber,
@@ -983,6 +1009,7 @@ private fun QuestionReviewCard(
         ) {
           Text(
             text = "${formatMarks(awarded)} / ${formatMarks(maxMarks)} marks",
+            fontFamily = FigtreeFontFamily,
             fontSize = 11.5.sp,
             fontWeight = FontWeight.Bold,
             color = scoreFg,
@@ -994,6 +1021,7 @@ private fun QuestionReviewCard(
       // 2. Full-Width Question Text
       Text(
         text = question.questionText?.ifBlank { "Question $qLabel" } ?: "Question $qLabel",
+        fontFamily = BricolageGrotesqueFontFamily,
         fontSize = 13.5.sp,
         fontWeight = FontWeight.SemiBold,
         color = TextPrimary,
@@ -1022,6 +1050,7 @@ private fun QuestionReviewCard(
             )
             Text(
               text = question.reviewReason,
+              fontFamily = FigtreeFontFamily,
               fontSize = 11.5.sp,
               lineHeight = 15.5.sp,
               fontWeight = FontWeight.Medium,
@@ -1044,6 +1073,7 @@ private fun QuestionReviewCard(
         ) {
           Text(
             text = "Student Answer (OCR)",
+            fontFamily = BricolageGrotesqueFontFamily,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = RoyalBlue,
@@ -1051,8 +1081,8 @@ private fun QuestionReviewCard(
           Text(
             text = question.studentAnswer?.ifBlank { "No answer text extracted." }
               ?: "No answer text extracted.",
+            fontFamily = FigtreeFontFamily,
             fontSize = 12.sp,
-            fontFamily = FontFamily.Monospace,
             color = TextPrimary,
             lineHeight = 16.5.sp,
           )
@@ -1064,12 +1094,14 @@ private fun QuestionReviewCard(
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text(
             text = "Grading Feedback",
+            fontFamily = BricolageGrotesqueFontFamily,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             color = TextSecondary,
           )
           Text(
             text = question.feedback,
+            fontFamily = FigtreeFontFamily,
             fontSize = 12.5.sp,
             color = TextPrimary,
             lineHeight = 17.sp,
@@ -1100,6 +1132,7 @@ private fun QuestionReviewCard(
             )
             Text(
               text = if (showReferenceDetails) "Hide Rubric" else "Show Rubric",
+              fontFamily = FigtreeFontFamily,
               fontSize = 11.5.sp,
               fontWeight = FontWeight.SemiBold,
               color = RoyalBlue,
@@ -1137,6 +1170,7 @@ private fun QuestionReviewCard(
               )
               Text(
                 text = "Edit Marks / Feedback",
+                fontFamily = FigtreeFontFamily,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = RoyalBlue,
@@ -1161,12 +1195,14 @@ private fun QuestionReviewCard(
               Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                   text = "Expected Answer",
+                  fontFamily = BricolageGrotesqueFontFamily,
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   color = RoyalBlue,
                 )
                 Text(
                   text = question.expectedAnswer,
+                  fontFamily = FigtreeFontFamily,
                   fontSize = 12.sp,
                   color = TextSecondary,
                   lineHeight = 16.sp,
@@ -1177,12 +1213,14 @@ private fun QuestionReviewCard(
               Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                   text = "Marking Criteria",
+                  fontFamily = BricolageGrotesqueFontFamily,
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   color = RoyalBlue,
                 )
                 Text(
                   text = question.markingCriteria,
+                  fontFamily = FigtreeFontFamily,
                   fontSize = 12.sp,
                   color = TextSecondary,
                   lineHeight = 16.sp,
@@ -1216,6 +1254,7 @@ private fun QuestionReviewCard(
               ) {
                 Text(
                   text = "Override Q$qLabel",
+                  fontFamily = BricolageGrotesqueFontFamily,
                   fontSize = 12.sp,
                   fontWeight = FontWeight.Bold,
                   color = TextPrimary,
@@ -1227,6 +1266,7 @@ private fun QuestionReviewCard(
                 ) {
                   Text(
                     text = "Max: ${formatMarks(maxMarks)}",
+                    fontFamily = FigtreeFontFamily,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = TextSecondary,
@@ -1242,6 +1282,7 @@ private fun QuestionReviewCard(
               ) {
                 Text(
                   text = "Done",
+                  fontFamily = FigtreeFontFamily,
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   color = Color.White,
@@ -1264,7 +1305,7 @@ private fun QuestionReviewCard(
                   onUpdate(parsed, feedbackInput)
                 }
               },
-              label = { Text("Awarded Marks (Max ${formatMarks(maxMarks)})", fontSize = 11.5.sp) },
+              label = { Text("Awarded Marks (Max ${formatMarks(maxMarks)})", fontFamily = FigtreeFontFamily, fontSize = 11.5.sp) },
               leadingIcon = {
                 Icon(
                   imageVector = Icons.Default.Grade,
@@ -1277,6 +1318,7 @@ private fun QuestionReviewCard(
               isError = marksError != null,
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
               textStyle = TextStyle(
+                fontFamily = BricolageGrotesqueFontFamily,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary,
@@ -1298,6 +1340,7 @@ private fun QuestionReviewCard(
             if (marksError != null) {
               Text(
                 text = marksError!!,
+                fontFamily = FigtreeFontFamily,
                 fontSize = 11.sp,
                 color = StatusWarning,
                 fontWeight = FontWeight.Medium,
@@ -1311,13 +1354,14 @@ private fun QuestionReviewCard(
                 val parsedMarks = marksInput.trim().toDoubleOrNull() ?: awarded
                 onUpdate(parsedMarks, updatedFeedback)
               },
-              label = { Text("Feedback", fontSize = 11.5.sp) },
+              label = { Text("Feedback", fontFamily = FigtreeFontFamily, fontSize = 11.5.sp) },
               minLines = 2,
               maxLines = 4,
               keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Sentences
               ),
               textStyle = TextStyle(
+                fontFamily = FigtreeFontFamily,
                 fontSize = 12.5.sp,
                 color = TextPrimary,
                 lineHeight = 17.sp,

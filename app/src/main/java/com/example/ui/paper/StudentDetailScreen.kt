@@ -136,6 +136,7 @@ fun StudentDetailScreen(
   viewModel: StudentDetailViewModel,
   onNavigateBack: () -> Unit,
   onNavigateToScan: (studentId: String, classId: String) -> Unit,
+  onNavigateToTeacherReview: (studentId: String, paperId: String) -> Unit = { _, _ -> },
   modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -510,6 +511,13 @@ fun StudentDetailScreen(
                       viewModel.runAiEvaluation(paperId)
                     }
                   },
+                  onViewApprovedResult = {
+                    if (paperId.isNotBlank()) {
+                      viewModel.consumeReviewNavigation()
+                      viewModel.openApprovedEvaluation(paperId)
+                      onNavigateToTeacherReview(student.id ?: studentId, paperId)
+                    }
+                  },
                   onStopAiEvaluation = {
                     if (paperId.isNotBlank()) {
                       viewModel.stopAiEvaluation(paperId)
@@ -581,31 +589,13 @@ fun StudentDetailScreen(
     )
   }
 
-  // Teacher Review & Approval Bottom Sheet
-  uiState.evaluationResult?.let { evalResponse ->
-    TeacherReviewDialog(
-      evaluationResponse = evalResponse,
-      editedQuestions = uiState.editedQuestions,
-      studentName = uiState.student?.name.orEmpty(),
-      studentRollNumber = uiState.student?.rollNumber.orEmpty(),
-      fatherName = uiState.student?.fatherName.orEmpty(),
-      subjectName = uiState.classRoom?.subjectName.orEmpty(),
-      isApproving = uiState.isApproving,
-      approvalError = uiState.approvalError,
-      isSavingCorrections = uiState.isSavingCorrections,
-      saveCorrectionsSuccess = uiState.saveCorrectionsSuccess,
-      saveCorrectionsError = uiState.saveCorrectionsError,
-      onUpdateQuestion = { qId, qNum, marks, feedback ->
-        viewModel.onUpdateQuestion(qId, qNum, marks, feedback)
-      },
-      onSaveCorrections = { evalId, pId ->
-        viewModel.saveTeacherCorrections(evalId, pId)
-      },
-      onApprove = { evalId, pId ->
-        viewModel.approveEvaluation(evalId, pId)
-      },
-      onDismiss = { viewModel.dismissEvaluationDialog() },
-    )
+  // One-shot Full-Screen Navigation to Teacher Review Page
+  val pendingReviewPaperId = uiState.pendingReviewNavigationPaperId
+  LaunchedEffect(pendingReviewPaperId) {
+    if (!pendingReviewPaperId.isNullOrBlank()) {
+      viewModel.consumeReviewNavigation()
+      onNavigateToTeacherReview(uiState.student?.id ?: studentId, pendingReviewPaperId)
+    }
   }
 }
 }
@@ -902,6 +892,7 @@ private fun PaperCard(
   onRunPageOcr: (StudentPaperPage) -> Unit,
   onClearPageOcrError: (String) -> Unit,
   onRunAiEvaluation: () -> Unit,
+  onViewApprovedResult: () -> Unit = onRunAiEvaluation,
   onStopAiEvaluation: () -> Unit,
   onDeleteClick: () -> Unit,
 ) {
@@ -1399,7 +1390,13 @@ private fun PaperCard(
             }
 
             Button(
-              onClick = onRunAiEvaluation,
+              onClick = {
+                if (isApproved) {
+                  onViewApprovedResult()
+                } else {
+                  onRunAiEvaluation()
+                }
+              },
               shape = RoundedCornerShape(10.dp),
               colors = ButtonDefaults.buttonColors(
                 containerColor = RoyalBlue,

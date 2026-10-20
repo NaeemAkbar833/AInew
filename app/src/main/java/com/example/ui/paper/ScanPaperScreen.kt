@@ -632,69 +632,66 @@ private fun EmptyPagesState(
 
       Spacer(modifier = Modifier.height(20.dp))
 
-      Row(
+      Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
         Button(
           onClick = onTakePhoto,
-          shape = RoundedCornerShape(10.dp),
+          shape = RoundedCornerShape(12.dp),
           colors = ButtonDefaults.buttonColors(
             containerColor = RoyalBlue,
             contentColor = Color.White,
           ),
-          contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
           modifier = Modifier
-            .weight(1f)
-            .height(46.dp)
+            .fillMaxWidth()
+            .height(48.dp)
             .testTag("empty_take_photo_button"),
         ) {
           Icon(
             imageVector = Icons.Default.AddAPhoto,
             contentDescription = null,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(18.dp),
           )
-          Spacer(modifier = Modifier.width(5.dp))
+          Spacer(modifier = Modifier.width(8.dp))
           Text(
             text = "Take Photo",
             fontFamily = BricolageGrotesqueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
-            softWrap = false,
           )
         }
 
         OutlinedButton(
           onClick = onChooseGallery,
-          shape = RoundedCornerShape(10.dp),
+          shape = RoundedCornerShape(12.dp),
           border = BorderStroke(1.dp, RoyalBlue.copy(alpha = 0.5f)),
           colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = Color.White,
+            containerColor = LightBlueHighlight,
             contentColor = RoyalBlue,
           ),
-          contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
           modifier = Modifier
-            .weight(1f)
-            .height(46.dp)
+            .fillMaxWidth()
+            .height(48.dp)
             .testTag("empty_choose_gallery_button"),
         ) {
           Icon(
             imageVector = Icons.Default.PhotoLibrary,
             contentDescription = null,
             tint = RoyalBlue,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(18.dp),
           )
-          Spacer(modifier = Modifier.width(4.dp))
+          Spacer(modifier = Modifier.width(8.dp))
           Text(
-            text = "From Gallery",
+            text = "Choose from Gallery",
             fontFamily = BricolageGrotesqueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             color = RoyalBlue,
             maxLines = 1,
-            softWrap = false,
           )
         }
       }
