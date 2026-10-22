@@ -147,13 +147,39 @@ class StudentDetailViewModel(
 
   fun deletePaper(paper: StudentPaper, onSuccess: () -> Unit = {}) {
     viewModelScope.launch {
+      val paperId = paper.id
+      if (!paperId.isNullOrBlank() && _uiState.value.isEvaluatingPaperId == paperId) {
+        evaluationJob?.cancel()
+        evaluationJob = null
+      }
       _uiState.update { it.copy(isDeletingPaper = true, deletePaperError = null) }
       val result = paperRepository.deletePaper(paper)
       result.fold(
         onSuccess = {
-          _uiState.update {
-            it.copy(
-              papers = it.papers.filter { p -> p.id != paper.id },
+          val deletedPaths = paper.pages.map { it.storagePath }.toSet()
+          val deletedPageIds = paper.pages.mapNotNull { it.id }.toSet()
+          _uiState.update { state ->
+            val shouldClearEvaluation = !paper.id.isNullOrBlank() && state.evaluatedPaperId == paper.id
+            val shouldClearEvaluating = !paper.id.isNullOrBlank() && state.isEvaluatingPaperId == paper.id
+            state.copy(
+              papers = state.papers.filter { p -> p.id != paper.id },
+              signedUrls = state.signedUrls - deletedPaths,
+              ocrLoadingPageIds = state.ocrLoadingPageIds - deletedPageIds,
+              ocrTextByPageId = state.ocrTextByPageId - deletedPageIds,
+              ocrErrorByPageId = state.ocrErrorByPageId - deletedPageIds,
+              isEvaluatingPaperId = if (shouldClearEvaluating) null else state.isEvaluatingPaperId,
+              evaluatedPaperId = if (shouldClearEvaluation) null else state.evaluatedPaperId,
+              evaluationResult = if (shouldClearEvaluation) null else state.evaluationResult,
+              evaluationResultJson = if (shouldClearEvaluation) null else state.evaluationResultJson,
+              evaluationError = if (shouldClearEvaluation) null else state.evaluationError,
+              editedQuestions = if (shouldClearEvaluation) null else state.editedQuestions,
+              pendingReviewNavigationPaperId = if (state.pendingReviewNavigationPaperId == paper.id) null else state.pendingReviewNavigationPaperId,
+              isApproving = if (shouldClearEvaluation) false else state.isApproving,
+              approvalSuccess = if (shouldClearEvaluation) false else state.approvalSuccess,
+              approvalError = if (shouldClearEvaluation) null else state.approvalError,
+              isSavingCorrections = if (shouldClearEvaluation) false else state.isSavingCorrections,
+              saveCorrectionsSuccess = if (shouldClearEvaluation) false else state.saveCorrectionsSuccess,
+              saveCorrectionsError = if (shouldClearEvaluation) null else state.saveCorrectionsError,
               isDeletingPaper = false,
               deletePaperError = null,
               feedbackMessage = "Paper submission deleted.",
@@ -166,6 +192,85 @@ class StudentDetailViewModel(
             it.copy(
               isDeletingPaper = false,
               deletePaperError = error.localizedMessage ?: "Failed to delete paper.",
+            )
+          }
+        }
+      )
+    }
+  }
+
+  fun deletePaperPage(page: com.example.data.model.StudentPaperPage, onSuccess: () -> Unit = {}) {
+    viewModelScope.launch {
+      if (page.paperId.isNotBlank() && _uiState.value.isEvaluatingPaperId == page.paperId) {
+        evaluationJob?.cancel()
+        evaluationJob = null
+      }
+      _uiState.update { it.copy(isDeletingPaper = true, deletePaperError = null) }
+      val result = paperRepository.deletePaperPage(page)
+      result.fold(
+        onSuccess = {
+          _uiState.update { state ->
+            val updatedPapers = state.papers.mapNotNull { p ->
+              if (p.id != page.paperId) {
+                p
+              } else {
+                val remaining = p.pages
+                  .filterNot {
+                    (!page.id.isNullOrBlank() && it.id == page.id) ||
+                      (page.id.isNullOrBlank() && it.pageNumber == page.pageNumber)
+                  }
+                  .sortedBy { it.pageNumber }
+                  .mapIndexed { index, remainingPage ->
+                    remainingPage.copy(pageNumber = index + 1)
+                  }
+                if (remaining.isEmpty()) {
+                  null
+                } else {
+                  p.copy(
+                    totalPages = remaining.size,
+                    status = "scanned",
+                    ocrStatus = "pending",
+                    combinedOcrText = null,
+                    ocrError = null,
+                    evaluation = null,
+                    pages = remaining,
+                  )
+                }
+              }
+            }
+            val shouldClearEvaluation = state.evaluatedPaperId == page.paperId
+            val shouldClearEvaluating = state.isEvaluatingPaperId == page.paperId
+            state.copy(
+              papers = updatedPapers,
+              signedUrls = state.signedUrls - page.storagePath,
+              ocrLoadingPageIds = if (!page.id.isNullOrBlank()) state.ocrLoadingPageIds - page.id else state.ocrLoadingPageIds,
+              ocrTextByPageId = if (!page.id.isNullOrBlank()) state.ocrTextByPageId - page.id else state.ocrTextByPageId,
+              ocrErrorByPageId = if (!page.id.isNullOrBlank()) state.ocrErrorByPageId - page.id else state.ocrErrorByPageId,
+              isEvaluatingPaperId = if (shouldClearEvaluating) null else state.isEvaluatingPaperId,
+              evaluatedPaperId = if (shouldClearEvaluation) null else state.evaluatedPaperId,
+              evaluationResult = if (shouldClearEvaluation) null else state.evaluationResult,
+              evaluationResultJson = if (shouldClearEvaluation) null else state.evaluationResultJson,
+              evaluationError = if (shouldClearEvaluation) null else state.evaluationError,
+              editedQuestions = if (shouldClearEvaluation) null else state.editedQuestions,
+              pendingReviewNavigationPaperId = if (state.pendingReviewNavigationPaperId == page.paperId) null else state.pendingReviewNavigationPaperId,
+              isApproving = if (shouldClearEvaluation) false else state.isApproving,
+              approvalSuccess = if (shouldClearEvaluation) false else state.approvalSuccess,
+              approvalError = if (shouldClearEvaluation) null else state.approvalError,
+              isSavingCorrections = if (shouldClearEvaluation) false else state.isSavingCorrections,
+              saveCorrectionsSuccess = if (shouldClearEvaluation) false else state.saveCorrectionsSuccess,
+              saveCorrectionsError = if (shouldClearEvaluation) null else state.saveCorrectionsError,
+              isDeletingPaper = false,
+              deletePaperError = null,
+              feedbackMessage = "Page deleted.",
+            )
+          }
+          onSuccess()
+        },
+        onFailure = { error ->
+          _uiState.update {
+            it.copy(
+              isDeletingPaper = false,
+              deletePaperError = error.localizedMessage ?: "Failed to delete page.",
             )
           }
         }

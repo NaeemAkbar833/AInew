@@ -6,6 +6,7 @@ import com.example.data.model.Exam
 import com.example.data.model.ExamType
 import com.example.data.remote.SupabaseClientProvider
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -118,13 +119,88 @@ class SupabaseExamRepository(
       val teacherId = authRepository.getCurrentUserId()
         ?: return@withContext Result.failure(IllegalStateException("Teacher is not authenticated."))
 
-      SupabaseClientProvider.client.postgrest["exams"]
-        .delete {
+      // 1. Verify exam exists and belongs to the authenticated teacher before touching Storage
+      val existingExams = SupabaseClientProvider.client.postgrest["exams"]
+        .select(Columns.list("id")) {
           filter {
             eq("id", id)
             eq("teacher_id", teacherId)
           }
         }
+        .decodeList<IdRow>()
+
+      if (existingExams.isEmpty()) {
+        return@withContext Result.failure(
+          IllegalStateException("Deletion failed. The exam was not found or access was denied.")
+        )
+      }
+
+      // 2. Find all classes belonging to this exam BEFORE database cascade deletion
+      val classRows = SupabaseClientProvider.client.postgrest["classes"]
+        .select(Columns.list("id", "question_paper_path")) {
+          filter {
+            eq("exam_id", id)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<ClassStorageProjection>()
+
+      if (classRows.isNotEmpty()) {
+        val classIds = classRows.mapNotNull { it.id }.filter { it.isNotBlank() }
+
+        // 3. Collect and delete all student answer-sheet page files across all classes in this exam FIRST
+        val studentPaperPaths = StorageCleanupHelper.collectStudentPaperPathsForClasses(
+          classIds = classIds,
+          teacherId = teacherId,
+        )
+        StorageCleanupHelper.deleteFromBucket(
+          bucketName = StorageCleanupHelper.STUDENT_PAPERS_BUCKET,
+          rawPaths = studentPaperPaths,
+        )
+
+        // 4. Collect and delete all class question-paper files across all classes in this exam FIRST
+        val questionPaperPaths = StorageCleanupHelper.collectQuestionPaperPathsForClasses(
+          classRooms = classRows,
+          teacherId = teacherId,
+        )
+        StorageCleanupHelper.deleteFromBucket(
+          bucketName = StorageCleanupHelper.QUESTION_PAPERS_BUCKET,
+          rawPaths = questionPaperPaths,
+        )
+
+        // 5. Delete associated child records and classes belonging to this exam
+        StorageCleanupHelper.deleteClassChildRecords(
+          classIds = classIds,
+          teacherId = teacherId,
+        )
+
+        if (classIds.isNotEmpty()) {
+          SupabaseClientProvider.client.postgrest["classes"]
+            .delete {
+              filter {
+                isIn("id", classIds)
+                eq("teacher_id", teacherId)
+              }
+            }
+        }
+      }
+
+      // 6. Delete exam database record
+      val deletedExams = SupabaseClientProvider.client.postgrest["exams"]
+        .delete {
+          select(Columns.list("id"))
+          filter {
+            eq("id", id)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<IdRow>()
+
+      if (deletedExams.isEmpty()) {
+        return@withContext Result.failure(
+          IllegalStateException("Deletion failed. The exam was not found or access was denied.")
+        )
+      }
 
       Result.success(Unit)
     } catch (e: Exception) {

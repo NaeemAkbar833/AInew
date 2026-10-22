@@ -3,8 +3,11 @@ package com.example
 import android.content.Context
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
+import com.example.data.model.AiEvaluationResponse
 import com.example.data.model.ClassRoom
 import com.example.data.model.ClassTiming
+import com.example.data.model.EvaluationDetail
+import com.example.data.model.EvaluationStatus
 import com.example.data.model.Exam
 import com.example.data.model.ExamType
 import com.example.data.model.Student
@@ -72,11 +75,12 @@ class FakeAuthRepository(
   override suspend fun checkSession(): Boolean = signedInUser != null
 }
 
-class FakeExamRepository(
+internal class FakeExamRepository(
   initialExams: List<Exam> = emptyList(),
   var shouldFail: Boolean = false,
 ) : ExamRepository {
   private val exams = initialExams.toMutableList()
+  val deletedExamIds = mutableListOf<String>()
 
   override suspend fun getExams(): Result<List<Exam>> {
     return if (shouldFail) {
@@ -111,20 +115,24 @@ class FakeExamRepository(
   }
 
   override suspend fun deleteExam(id: String): Result<Unit> {
-    return if (shouldFail) {
-      Result.failure(Exception("Failed to delete exam"))
-    } else {
-      exams.removeAll { it.id == id }
-      Result.success(Unit)
+    if (shouldFail) {
+      return Result.failure(Exception("Failed to delete exam"))
     }
+    val removed = exams.removeAll { it.id == id }
+    if (!removed) {
+      return Result.failure(IllegalStateException("Deletion failed. The exam was not found or access was denied."))
+    }
+    deletedExamIds.add(id)
+    return Result.success(Unit)
   }
 }
 
-class FakeClassRepository(
+internal class FakeClassRepository(
   initialClasses: List<ClassRoom> = emptyList(),
   var shouldFail: Boolean = false,
 ) : ClassRepository {
   private val classes = initialClasses.toMutableList()
+  val deletedClassIds = mutableListOf<String>()
 
   override suspend fun getClassesByExamId(examId: String): Result<List<ClassRoom>> {
     return if (shouldFail) {
@@ -173,20 +181,24 @@ class FakeClassRepository(
   }
 
   override suspend fun deleteClass(id: String): Result<Unit> {
-    return if (shouldFail) {
-      Result.failure(Exception("Failed to delete class"))
-    } else {
-      classes.removeAll { it.id == id }
-      Result.success(Unit)
+    if (shouldFail) {
+      return Result.failure(Exception("Failed to delete class"))
     }
+    val removed = classes.removeAll { it.id == id }
+    if (!removed) {
+      return Result.failure(IllegalStateException("Deletion failed. The class was not found or access was denied."))
+    }
+    deletedClassIds.add(id)
+    return Result.success(Unit)
   }
 }
 
-class FakeStudentRepository(
+internal class FakeStudentRepository(
   initialStudents: List<Student> = emptyList(),
   var shouldFail: Boolean = false,
 ) : StudentRepository {
   private val students = initialStudents.toMutableList()
+  val deletedStudentIds = mutableListOf<String>()
 
   override suspend fun getStudentsByClassId(classId: String): Result<List<Student>> {
     return if (shouldFail) {
@@ -231,15 +243,15 @@ class FakeStudentRepository(
   }
 
   override suspend fun deleteStudent(studentId: String): Result<Unit> {
-    return if (shouldFail) {
-      Result.failure(Exception("Failed to delete student"))
+    if (shouldFail) {
+      return Result.failure(Exception("Failed to delete student"))
+    }
+    val removed = students.removeAll { it.id == studentId }
+    return if (removed) {
+      deletedStudentIds.add(studentId)
+      Result.success(Unit)
     } else {
-      val removed = students.removeAll { it.id == studentId }
-      if (removed) {
-        Result.success(Unit)
-      } else {
-        Result.failure(IllegalStateException("Student not found"))
-      }
+      Result.failure(IllegalStateException("Student not found"))
     }
   }
 
@@ -272,7 +284,7 @@ class FakeStudentRepository(
   }
 }
 
-class FakePaperRepository(
+internal class FakePaperRepository(
   initialPapers: List<StudentPaper> = emptyList(),
   var shouldFail: Boolean = false,
 ) : PaperRepository {
@@ -325,12 +337,55 @@ class FakePaperRepository(
   }
 
   override suspend fun deletePaper(paper: StudentPaper): Result<Unit> {
-    return if (shouldFail) {
-      Result.failure(Exception("Failed to delete paper"))
-    } else {
-      papers.removeAll { it.id == paper.id }
-      deletedStoragePaths.addAll(paper.pages.map { it.storagePath })
+    if (shouldFail) {
+      return Result.failure(Exception("Failed to delete paper"))
+    }
+    return try {
+      val paperId = paper.id ?: return Result.failure(IllegalArgumentException("Cannot delete paper without ID"))
+      val storedPaper = papers.firstOrNull { it.id == paperId }
+        ?: return Result.failure(IllegalStateException("Paper deletion failed. Paper was not found or permission denied."))
+
+      papers.removeAll { it.id == paperId }
+      deletedStoragePaths.addAll(storedPaper.pages.map { it.storagePath })
       Result.success(Unit)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  override suspend fun deletePaperPage(page: StudentPaperPage): Result<Unit> {
+    if (shouldFail) {
+      return Result.failure(Exception("Failed to delete page"))
+    }
+    return try {
+      val idx = papers.indexOfFirst { it.id == page.paperId }
+      if (idx == -1) {
+        return Result.failure(IllegalStateException("Paper not found"))
+      }
+      val paper = papers[idx]
+      val remaining = paper.pages
+        .filterNot { it.id == page.id }
+        .sortedBy { it.pageNumber }
+        .mapIndexed { index, remainingPage ->
+          remainingPage.copy(pageNumber = index + 1)
+        }
+      deletedStoragePaths.add(page.storagePath)
+      if (remaining.isEmpty()) {
+        papers.removeAt(idx)
+      } else {
+        papers[idx] = paper.copy(
+          totalPages = remaining.size,
+          status = "scanned",
+          ocrStatus = "pending",
+          combinedOcrText = null,
+          ocrError = null,
+          evaluation = null,
+          pages = remaining,
+        )
+      }
+      Result.success(Unit)
+    } catch (e: Exception) {
+      Result.failure(e)
     }
   }
 
@@ -1076,4 +1131,395 @@ class ExampleRobolectricTest {
     viewModel.consumeReviewNavigation()
     assertNull(viewModel.uiState.value.pendingReviewNavigationPaperId)
   }
+
+  @Test
+  fun `verify StorageCleanupHelper normalizes paths and StudentDetailViewModel deletes individual page`() = runTest {
+    val normalized = com.example.data.repository.StorageCleanupHelper.normalizeStoragePaths(
+      rawPaths = listOf(
+        "user-123/class-1/student-1/paper-1/page_1.jpg",
+        "/student-papers/user-123/class-1/student-1/paper-1/page_1.jpg",
+        "  /user-123/class-1/student-1/paper-1/page_2.jpg  ",
+        "",
+        null,
+      ),
+      bucketName = "student-papers",
+    )
+    assertEquals(
+      listOf(
+        "user-123/class-1/student-1/paper-1/page_1.jpg",
+        "user-123/class-1/student-1/paper-1/page_2.jpg",
+      ),
+      normalized,
+    )
+
+    val page1 = StudentPaperPage(
+      id = "page-1",
+      paperId = "paper-1",
+      studentId = "student-1",
+      teacherId = "user-123",
+      pageNumber = 1,
+      storagePath = "user-123/class-1/student-1/paper-1/page_1.jpg",
+    )
+    val page2 = StudentPaperPage(
+      id = "page-2",
+      paperId = "paper-1",
+      studentId = "student-1",
+      teacherId = "user-123",
+      pageNumber = 2,
+      storagePath = "user-123/class-1/student-1/paper-1/page_2.jpg",
+    )
+    val paper = StudentPaper(
+      id = "paper-1",
+      studentId = "student-1",
+      classId = "class-1",
+      teacherId = "user-123",
+      totalPages = 2,
+      pages = listOf(page1, page2),
+    )
+
+    val fakeStudentRepo = FakeStudentRepository(
+      listOf(Student(id = "student-1", classId = "class-1", teacherId = "user-123", name = "Zaid", fatherName = "Ali", rollNumber = "01"))
+    )
+    val fakeClassRepo = FakeClassRepository(
+      listOf(ClassRoom(id = "class-1", examId = "exam-1", teacherId = "user-123", session = "2022-2026", semester = "4th", timing = "Morning", subjectName = "DB", totalMarks = 100))
+    )
+    val fakePaperRepo = FakePaperRepository(listOf(paper))
+    val viewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo)
+    viewModel.loadStudentAndPapers("student-1")
+
+    // Deleting page 1 keeps page 2 intact, resequences page 2 to page_number = 1, and removes only page 1's storage file
+    viewModel.deletePaperPage(page1)
+    assertEquals(listOf("user-123/class-1/student-1/paper-1/page_1.jpg"), fakePaperRepo.deletedStoragePaths)
+    assertEquals(1, viewModel.uiState.value.papers.size)
+    assertEquals(1, viewModel.uiState.value.papers.first().totalPages)
+    assertEquals(1, viewModel.uiState.value.papers.first().pages.size)
+    assertEquals("page-2", viewModel.uiState.value.papers.first().pages.first().id)
+    assertEquals(1, viewModel.uiState.value.papers.first().pages.first().pageNumber)
+
+    // Deleting the last remaining page removes its storage file and removes the paper
+    viewModel.deletePaperPage(page2)
+    assertEquals(
+      listOf(
+        "user-123/class-1/student-1/paper-1/page_1.jpg",
+        "user-123/class-1/student-1/paper-1/page_2.jpg",
+      ),
+      fakePaperRepo.deletedStoragePaths,
+    )
+    assertTrue(viewModel.uiState.value.papers.isEmpty())
+
+    // Verify generic non-RestException 404/not-found messages are NOT treated as already-missing storage objects
+    assertFalse(
+      com.example.data.repository.StorageCleanupHelper.isAlreadyMissingStorageError(
+        RuntimeException("404 Bucket not found")
+      )
+    )
+    assertFalse(
+      com.example.data.repository.StorageCleanupHelper.isAlreadyMissingStorageError(
+        RuntimeException("404 Object not found")
+      )
+    )
+
+    // Verify deleteFromBucket surfaces Storage errors instead of silently succeeding
+    var simulateStorageError = true
+    val deletedChunks = mutableListOf<List<String>>()
+    val fakeBucketApi = java.lang.reflect.Proxy.newProxyInstance(
+      io.github.jan.supabase.storage.BucketApi::class.java.classLoader,
+      arrayOf(io.github.jan.supabase.storage.BucketApi::class.java),
+    ) { _, method, args ->
+      when (method.name) {
+        "delete" -> {
+          if (simulateStorageError) {
+            throw RuntimeException("Storage permission denied")
+          }
+          @Suppress("UNCHECKED_CAST")
+          val pathsArg = args?.firstOrNull() as? Collection<String> ?: emptyList()
+          deletedChunks.add(pathsArg.toList())
+          Unit
+        }
+        else -> throw UnsupportedOperationException("Unexpected BucketApi call: ${method.name}")
+      }
+    } as io.github.jan.supabase.storage.BucketApi
+
+    val storageFailureResult = runCatching {
+      com.example.data.repository.StorageCleanupHelper.deleteFromBucket(
+        bucketName = "student-papers",
+        rawPaths = listOf("user-123/class-1/student-1/paper-1/page_1.jpg"),
+        bucketApi = fakeBucketApi,
+      )
+    }
+    assertTrue(storageFailureResult.isFailure)
+    assertTrue(
+      storageFailureResult.exceptionOrNull()?.message?.contains("Failed to delete image files from cloud storage") == true
+    )
+
+    // When Storage delete succeeds, deleteFromBucket completes normally
+    simulateStorageError = false
+    val verifiedDeleteResult = runCatching {
+      com.example.data.repository.StorageCleanupHelper.deleteFromBucket(
+        bucketName = "student-papers",
+        rawPaths = listOf("user-123/class-1/student-1/paper-1/page_1.jpg"),
+        bucketApi = fakeBucketApi,
+      )
+    }
+    assertTrue(verifiedDeleteResult.isSuccess)
+    assertEquals(1, deletedChunks.size)
+  }
+
+  @Test
+  fun `verify deletePaperPage and deletePaper update page numbering and clear evaluation state`() = runTest {
+    val page1 = StudentPaperPage(
+      id = "page-1",
+      paperId = "paper-prov",
+      studentId = "student-1",
+      teacherId = "user-123",
+      pageNumber = 1,
+      storagePath = "user-123/class-1/student-1/paper-prov/page_1.jpg",
+    )
+    val page2 = StudentPaperPage(
+      id = "page-2",
+      paperId = "paper-prov",
+      studentId = "student-1",
+      teacherId = "user-123",
+      pageNumber = 2,
+      storagePath = "user-123/class-1/student-1/paper-prov/page_2.jpg",
+    )
+    val provisionalPaper = StudentPaper(
+      id = "paper-prov",
+      studentId = "student-1",
+      classId = "class-1",
+      teacherId = "user-123",
+      totalPages = 2,
+      status = "completed",
+      ocrStatus = "completed",
+      combinedOcrText = "Page 1 and Page 2 text",
+      evaluation = EvaluationStatus(status = "completed"),
+      pages = listOf(page1, page2),
+    )
+
+    val approvedPage = StudentPaperPage(
+      id = "page-app-1",
+      paperId = "paper-app",
+      studentId = "student-1",
+      teacherId = "user-123",
+      pageNumber = 1,
+      storagePath = "user-123/class-1/student-1/paper-app/page_1.jpg",
+    )
+    val approvedPaper = StudentPaper(
+      id = "paper-app",
+      studentId = "student-1",
+      classId = "class-1",
+      teacherId = "user-123",
+      totalPages = 1,
+      status = "approved",
+      evaluation = EvaluationStatus(status = "approved"),
+      pages = listOf(approvedPage),
+    )
+
+    val fakeStudentRepo = FakeStudentRepository(
+      listOf(Student(id = "student-1", classId = "class-1", teacherId = "user-123", name = "Zaid", fatherName = "Ali", rollNumber = "01"))
+    )
+    val fakeClassRepo = FakeClassRepository(
+      listOf(ClassRoom(id = "class-1", examId = "exam-1", teacherId = "user-123", session = "2022-2026", semester = "4th", timing = "Morning", subjectName = "DB", totalMarks = 100))
+    )
+    val fakePaperRepo = FakePaperRepository(listOf(provisionalPaper, approvedPaper))
+    val viewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo)
+    viewModel.loadStudentAndPapers("student-1")
+
+    val provisionalEval = AiEvaluationResponse(
+      status = "completed",
+      percentageAvailable = true,
+      evaluation = EvaluationDetail(
+        id = "eval-prov",
+        paperId = "paper-prov",
+        studentId = "student-1",
+        classId = "class-1",
+        teacherId = "user-123",
+        status = "completed",
+        totalMarksObtained = 80.0,
+        totalMarks = 100.0,
+        percentage = 80.0,
+        percentageAvailable = true,
+      )
+    )
+    viewModel.setEvaluationResultForTesting("paper-prov", provisionalEval)
+    assertEquals("paper-prov", viewModel.uiState.value.evaluatedPaperId)
+    assertNotNull(viewModel.uiState.value.evaluationResult)
+
+    // 1. Deleting page 1 from the 2-page paper invalidates its outdated evaluation and resets paper status & page numbering
+    viewModel.deletePaperPage(page1)
+    assertNull(viewModel.uiState.value.evaluatedPaperId)
+    assertNull(viewModel.uiState.value.evaluationResult)
+    val modifiedProvPaper = viewModel.uiState.value.papers.first { it.id == "paper-prov" }
+    assertEquals(1, modifiedProvPaper.totalPages)
+    assertEquals("scanned", modifiedProvPaper.status)
+    assertNull(modifiedProvPaper.evaluation)
+    assertEquals(1, modifiedProvPaper.pages.first().pageNumber)
+
+    // 2. If the remaining 1-page paper is evaluated again and its last page is deleted, evaluationResult & evaluatedPaperId are cleared
+    viewModel.setEvaluationResultForTesting("paper-prov", provisionalEval)
+    assertEquals("paper-prov", viewModel.uiState.value.evaluatedPaperId)
+    assertNotNull(viewModel.uiState.value.evaluationResult)
+
+    viewModel.deletePaperPage(page2)
+    assertNull(viewModel.uiState.value.evaluatedPaperId)
+    assertNull(viewModel.uiState.value.evaluationResult)
+    assertFalse(viewModel.uiState.value.papers.any { it.id == "paper-prov" })
+
+    // 3. Deleting an approved paper succeeds, cleans up storage paths, and clears evaluation state
+    val approvedEval = AiEvaluationResponse(
+      status = "approved",
+      percentageAvailable = true,
+      evaluation = EvaluationDetail(
+        id = "eval-app",
+        paperId = "paper-app",
+        studentId = "student-1",
+        classId = "class-1",
+        teacherId = "user-123",
+        status = "approved",
+        totalMarksObtained = 95.0,
+        totalMarks = 100.0,
+        percentage = 95.0,
+        percentageAvailable = true,
+      )
+    )
+    viewModel.setEvaluationResultForTesting("paper-app", approvedEval)
+    viewModel.deletePaper(approvedPaper)
+    assertNull(viewModel.uiState.value.deletePaperError)
+    assertTrue(fakePaperRepo.deletedStoragePaths.contains("user-123/class-1/student-1/paper-app/page_1.jpg"))
+    assertFalse(viewModel.uiState.value.papers.any { it.id == "paper-app" })
+    assertNull(viewModel.uiState.value.evaluatedPaperId)
+    assertNull(viewModel.uiState.value.evaluationResult)
+  }
+
+  @Test
+  fun `verify all five deletion operations succeed and failures preserve ViewModel state`() = runTest {
+    val page1 = StudentPaperPage(
+      id = "page-1",
+      paperId = "paper-1",
+      studentId = "student-1",
+      teacherId = "user-123",
+      pageNumber = 1,
+      storagePath = "user-123/class-1/student-1/paper-1/page_1.jpg",
+    )
+    val page2 = StudentPaperPage(
+      id = "page-2",
+      paperId = "paper-1",
+      studentId = "student-1",
+      teacherId = "user-123",
+      pageNumber = 2,
+      storagePath = "user-123/class-1/student-1/paper-1/page_2.jpg",
+    )
+    val paper1 = StudentPaper(
+      id = "paper-1",
+      studentId = "student-1",
+      classId = "class-1",
+      teacherId = "user-123",
+      totalPages = 2,
+      status = "completed",
+      evaluation = EvaluationStatus(status = "completed"),
+      pages = listOf(page1, page2),
+    )
+
+    val student1 = Student(id = "student-1", classId = "class-1", teacherId = "user-123", name = "Zaid", fatherName = "Ali", rollNumber = "01")
+    val class1 = ClassRoom(id = "class-1", examId = "exam-1", teacherId = "user-123", session = "2022-2026", semester = "4th", timing = "Morning", subjectName = "DB", totalMarks = 100)
+    val exam1 = Exam(id = "exam-1", teacherId = "user-123", name = "Mid Term 2026", type = "Mid Term", date = "2026-10-05")
+
+    val fakeStudentRepo = FakeStudentRepository(initialStudents = listOf(student1), shouldFail = true)
+    val fakeClassRepo = FakeClassRepository(initialClasses = listOf(class1), shouldFail = true)
+    val fakeExamRepo = FakeExamRepository(initialExams = listOf(exam1), shouldFail = true)
+    val fakePaperRepo = FakePaperRepository(initialPapers = listOf(paper1), shouldFail = false)
+
+    val detailViewModel = StudentDetailViewModel(
+      FakeStudentRepository(initialStudents = listOf(student1)),
+      FakeClassRepository(initialClasses = listOf(class1)),
+      fakePaperRepo,
+    )
+    detailViewModel.loadStudentAndPapers("student-1")
+
+    val provisionalEval = AiEvaluationResponse(
+      status = "completed",
+      percentageAvailable = true,
+      evaluation = EvaluationDetail(
+        id = "eval-1",
+        paperId = "paper-1",
+        studentId = "student-1",
+        classId = "class-1",
+        teacherId = "user-123",
+        status = "completed",
+        totalMarksObtained = 75.0,
+        totalMarks = 100.0,
+        percentage = 75.0,
+        percentageAvailable = true,
+      )
+    )
+    detailViewModel.setEvaluationResultForTesting("paper-1", provisionalEval)
+
+    // 1. When repository fails, ViewModel preserves existing papers, pages, and evaluation state and surfaces the error
+    fakePaperRepo.shouldFail = true
+    detailViewModel.deletePaperPage(page1)
+    assertEquals("Failed to delete page", detailViewModel.uiState.value.deletePaperError)
+    assertTrue(fakePaperRepo.deletedStoragePaths.isEmpty())
+    assertEquals(2, detailViewModel.uiState.value.papers.first().pages.size)
+    assertEquals("paper-1", detailViewModel.uiState.value.evaluatedPaperId)
+    assertNotNull(detailViewModel.uiState.value.evaluationResult)
+
+    detailViewModel.deletePaper(paper1)
+    assertEquals("Failed to delete paper", detailViewModel.uiState.value.deletePaperError)
+    assertTrue(fakePaperRepo.deletedStoragePaths.isEmpty())
+    assertEquals(1, detailViewModel.uiState.value.papers.size)
+
+    val studentViewModel = StudentViewModel(
+      fakeStudentRepo,
+      FakeClassRepository(initialClasses = listOf(class1)),
+    )
+    fakeStudentRepo.shouldFail = false
+    studentViewModel.loadClassAndStudents("class-1")
+    fakeStudentRepo.shouldFail = true
+    studentViewModel.deleteStudent("student-1")
+    assertEquals("Failed to delete student", studentViewModel.uiState.value.deleteErrorMessage)
+    assertEquals(1, studentViewModel.uiState.value.students.size)
+
+    val classViewModel = ClassViewModel(fakeClassRepo)
+    fakeClassRepo.shouldFail = false
+    classViewModel.loadClasses("exam-1")
+    fakeClassRepo.shouldFail = true
+    classViewModel.deleteClass("class-1")
+    assertEquals("Failed to delete class", classViewModel.uiState.value.deleteErrorMessage)
+    assertEquals(1, classViewModel.uiState.value.classes.size)
+
+    val examViewModel = ExamViewModel(fakeExamRepo)
+    fakeExamRepo.shouldFail = false
+    examViewModel.loadExams()
+    fakeExamRepo.shouldFail = true
+    examViewModel.deleteExam("exam-1")
+    assertEquals("Failed to delete exam", examViewModel.uiState.value.deleteErrorMessage)
+    assertEquals(1, examViewModel.uiState.value.exams.size)
+
+    // 2. When repository succeeds, all five deletion operations remove the item from in-memory state
+    fakePaperRepo.shouldFail = false
+    detailViewModel.deletePaperPage(page1)
+    assertNull(detailViewModel.uiState.value.deletePaperError)
+    assertEquals(1, detailViewModel.uiState.value.papers.first().pages.size)
+    assertEquals(1, detailViewModel.uiState.value.papers.first().pages.first().pageNumber)
+
+    detailViewModel.deletePaper(detailViewModel.uiState.value.papers.first())
+    assertNull(detailViewModel.uiState.value.deletePaperError)
+    assertTrue(detailViewModel.uiState.value.papers.isEmpty())
+
+    fakeStudentRepo.shouldFail = false
+    studentViewModel.deleteStudent("student-1")
+    assertNull(studentViewModel.uiState.value.deleteErrorMessage)
+    assertTrue(studentViewModel.uiState.value.students.isEmpty())
+
+    fakeClassRepo.shouldFail = false
+    classViewModel.deleteClass("class-1")
+    assertNull(classViewModel.uiState.value.deleteErrorMessage)
+    assertTrue(classViewModel.uiState.value.classes.isEmpty())
+
+    fakeExamRepo.shouldFail = false
+    examViewModel.deleteExam("exam-1")
+    assertNull(examViewModel.uiState.value.deleteErrorMessage)
+    assertTrue(examViewModel.uiState.value.exams.isEmpty())
+  }
 }
+

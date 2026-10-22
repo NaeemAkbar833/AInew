@@ -10,15 +10,538 @@ import com.example.data.model.CreatePaperRequest
 import com.example.data.model.StudentPaper
 import com.example.data.model.StudentPaperPage
 import com.example.data.remote.SupabaseClientProvider
+import io.github.jan.supabase.exceptions.BadRequestRestException
+import io.github.jan.supabase.exceptions.NotFoundRestException
+import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.storage.BucketApi
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
+
+@Serializable
+internal data class IdRow(
+  @SerialName("id")
+  val id: String? = null,
+)
+
+@Serializable
+internal data class StoragePathRow(
+  @SerialName("storage_path")
+  val storagePath: String? = null,
+)
+
+@Serializable
+internal data class ClassStorageProjection(
+  @SerialName("id")
+  val id: String? = null,
+  @SerialName("question_paper_path")
+  val questionPaperPath: String? = null,
+)
+
+internal object StorageCleanupHelper {
+  private const val TAG = "StorageCleanupHelper"
+  const val QUESTION_PAPERS_BUCKET = "question-papers"
+  const val STUDENT_PAPERS_BUCKET = "student-papers"
+
+  fun normalizeStoragePaths(rawPaths: Iterable<String?>, bucketName: String): List<String> {
+    return rawPaths
+      .mapNotNull { raw ->
+        val trimmed = raw?.trim()?.trimStart('/') ?: return@mapNotNull null
+        if (trimmed.isBlank()) return@mapNotNull null
+        val withoutBucket = if (trimmed.startsWith("$bucketName/")) {
+          trimmed.removePrefix("$bucketName/").trimStart('/')
+        } else {
+          trimmed
+        }
+        withoutBucket.takeIf { it.isNotBlank() }
+      }
+      .distinct()
+  }
+
+  internal fun isAlreadyMissingStorageError(error: Throwable): Boolean {
+    if (error !is RestException) return false
+    if (error !is NotFoundRestException && error !is BadRequestRestException) return false
+    if (error.statusCode != 404 && error.statusCode != 400) return false
+
+    val structuredError = error.error.trim().lowercase()
+    val structuredDescription = error.description?.trim()?.lowercase().orEmpty()
+    val structuredMessage = error.message?.trim()?.lowercase().orEmpty()
+
+    // Never treat a missing bucket as an already-deleted object
+    if (structuredError.contains("bucket") ||
+      structuredDescription.contains("bucket") ||
+      structuredMessage.contains("bucket not found") ||
+      structuredMessage.contains("nosuchbucket")
+    ) {
+      return false
+    }
+
+    val isObjectErrorCode = structuredError == "not_found" ||
+      structuredError == "nosuchkey" ||
+      structuredError == "object not found"
+    val isObjectDescription = structuredDescription == "object not found" ||
+      structuredDescription == "the resource was not found" ||
+      structuredDescription == "the specified key does not exist" ||
+      structuredMessage.contains("object not found") ||
+      structuredMessage.contains("nosuchkey")
+
+    return isObjectErrorCode || (error is NotFoundRestException && isObjectDescription)
+  }
+
+  private fun isMissingTableError(error: Throwable, tableName: String): Boolean {
+    val msg = "${error.message.orEmpty()} ${error.cause?.message.orEmpty()}"
+    return msg.contains(tableName, ignoreCase = true) && (
+      msg.contains("PGRST205", ignoreCase = true) ||
+        msg.contains("42P01", ignoreCase = true) ||
+        msg.contains("schema cache", ignoreCase = true) ||
+        msg.contains("does not exist", ignoreCase = true)
+      )
+  }
+
+  suspend fun deleteFromBucket(
+    bucketName: String,
+    rawPaths: Iterable<String?>,
+    bucketApi: BucketApi? = null,
+  ) {
+    val paths = normalizeStoragePaths(rawPaths, bucketName)
+    if (paths.isEmpty()) return
+
+    val bucket = bucketApi ?: SupabaseClientProvider.client.storage.from(bucketName)
+    for (chunk in paths.chunked(100)) {
+      try {
+        bucket.delete(chunk)
+      } catch (e: Exception) {
+        if (chunk.size == 1 && isAlreadyMissingStorageError(e)) {
+          Log.w(TAG, "Storage object already absent in $bucketName: ${chunk.first()}")
+        } else if (chunk.size > 1 && isAlreadyMissingStorageError(e)) {
+          for (singlePath in chunk) {
+            try {
+              bucket.delete(listOf(singlePath))
+            } catch (singleError: Exception) {
+              if (isAlreadyMissingStorageError(singleError)) {
+                Log.w(TAG, "Storage object already absent in $bucketName: $singlePath")
+              } else {
+                Log.e(TAG, "Failed deleting $singlePath from $bucketName", singleError)
+                throw IllegalStateException(
+                  "Failed to delete image files from cloud storage ($bucketName). Please try again.",
+                  singleError,
+                )
+              }
+            }
+          }
+        } else {
+          Log.e(TAG, "Failed deleting ${chunk.size} file(s) from $bucketName", e)
+          throw IllegalStateException(
+            "Failed to delete image files from cloud storage ($bucketName). Please try again.",
+            e,
+          )
+        }
+      }
+    }
+  }
+
+  suspend fun collectQuestionPaperPathsForClasses(
+    classRooms: List<ClassStorageProjection>,
+    teacherId: String,
+  ): List<String> {
+    if (classRooms.isEmpty()) return emptyList()
+    val directPaths = classRooms.mapNotNull { it.questionPaperPath }
+    val classIds = classRooms.mapNotNull { it.id }.filter { it.isNotBlank() }.distinct()
+
+    val multiPagePaths = if (classIds.isNotEmpty()) {
+      try {
+        SupabaseClientProvider.client.postgrest["class_question_paper_pages"]
+          .select(Columns.list("storage_path")) {
+            filter {
+              isIn("class_id", classIds)
+              eq("teacher_id", teacherId)
+            }
+          }
+          .decodeList<StoragePathRow>()
+          .mapNotNull { it.storagePath }
+      } catch (e: Exception) {
+        if (isMissingTableError(e, "class_question_paper_pages")) {
+          emptyList()
+        } else {
+          throw e
+        }
+      }
+    } else {
+      emptyList()
+    }
+
+    return normalizeStoragePaths(directPaths + multiPagePaths, QUESTION_PAPERS_BUCKET)
+  }
+
+  suspend fun collectStudentPaperPathsForClasses(
+    classIds: List<String>,
+    teacherId: String,
+  ): List<String> {
+    val validClassIds = classIds.filter { it.isNotBlank() }.distinct()
+    if (validClassIds.isEmpty()) return emptyList()
+
+    val papersInClasses = SupabaseClientProvider.client.postgrest["student_papers"]
+      .select(Columns.list("id")) {
+        filter {
+          isIn("class_id", validClassIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+      .decodeList<IdRow>()
+      .mapNotNull { it.id }
+      .filter { it.isNotBlank() }
+
+    val studentIds = SupabaseClientProvider.client.postgrest["students"]
+      .select(Columns.list("id")) {
+        filter {
+          isIn("class_id", validClassIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+      .decodeList<IdRow>()
+      .mapNotNull { it.id }
+      .filter { it.isNotBlank() }
+      .distinct()
+
+    val papersByStudents = if (studentIds.isNotEmpty()) {
+      SupabaseClientProvider.client.postgrest["student_papers"]
+        .select(Columns.list("id")) {
+          filter {
+            isIn("student_id", studentIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<IdRow>()
+        .mapNotNull { it.id }
+        .filter { it.isNotBlank() }
+    } else {
+      emptyList()
+    }
+
+    val paperIds = (papersInClasses + papersByStudents).distinct()
+
+    val pathsByPaper = if (paperIds.isNotEmpty()) {
+      SupabaseClientProvider.client.postgrest["student_paper_pages"]
+        .select(Columns.list("storage_path")) {
+          filter {
+            isIn("paper_id", paperIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<StoragePathRow>()
+        .mapNotNull { it.storagePath }
+    } else {
+      emptyList()
+    }
+
+    val pathsByStudent = if (studentIds.isNotEmpty()) {
+      SupabaseClientProvider.client.postgrest["student_paper_pages"]
+        .select(Columns.list("storage_path")) {
+          filter {
+            isIn("student_id", studentIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<StoragePathRow>()
+        .mapNotNull { it.storagePath }
+    } else {
+      emptyList()
+    }
+
+    return normalizeStoragePaths(pathsByPaper + pathsByStudent, STUDENT_PAPERS_BUCKET)
+  }
+
+  suspend fun collectStudentPaperPathsForStudent(
+    studentId: String,
+    teacherId: String,
+  ): List<String> {
+    if (studentId.isBlank()) return emptyList()
+
+    val directPagePaths = SupabaseClientProvider.client.postgrest["student_paper_pages"]
+      .select(Columns.list("storage_path")) {
+        filter {
+          eq("student_id", studentId)
+          eq("teacher_id", teacherId)
+        }
+      }
+      .decodeList<StoragePathRow>()
+      .mapNotNull { it.storagePath }
+
+    val paperIds = SupabaseClientProvider.client.postgrest["student_papers"]
+      .select(Columns.list("id")) {
+        filter {
+          eq("student_id", studentId)
+          eq("teacher_id", teacherId)
+        }
+      }
+      .decodeList<IdRow>()
+      .mapNotNull { it.id }
+      .filter { it.isNotBlank() }
+      .distinct()
+
+    val paperPagePaths = if (paperIds.isNotEmpty()) {
+      SupabaseClientProvider.client.postgrest["student_paper_pages"]
+        .select(Columns.list("storage_path")) {
+          filter {
+            isIn("paper_id", paperIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<StoragePathRow>()
+        .mapNotNull { it.storagePath }
+    } else {
+      emptyList()
+    }
+
+    return normalizeStoragePaths(directPagePaths + paperPagePaths, STUDENT_PAPERS_BUCKET)
+  }
+
+  suspend fun collectStudentPaperPathsForPaper(
+    paperId: String,
+    teacherId: String,
+    inMemoryPaths: List<String>,
+  ): List<String> {
+    val dbPaths = if (paperId.isNotBlank()) {
+      SupabaseClientProvider.client.postgrest["student_paper_pages"]
+        .select(Columns.list("storage_path")) {
+          filter {
+            eq("paper_id", paperId)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<StoragePathRow>()
+        .mapNotNull { it.storagePath }
+    } else {
+      emptyList()
+    }
+    return normalizeStoragePaths(inMemoryPaths + dbPaths, STUDENT_PAPERS_BUCKET)
+  }
+
+  suspend fun deleteEvaluationRecordsForPapers(
+    paperIds: List<String>,
+    teacherId: String,
+  ) {
+    val validPaperIds = paperIds.filter { it.isNotBlank() }.distinct()
+    if (validPaperIds.isEmpty()) return
+
+    val evalIds = try {
+      SupabaseClientProvider.client.postgrest["student_paper_evaluations"]
+        .select(Columns.list("id")) {
+          filter {
+            isIn("paper_id", validPaperIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<IdRow>()
+        .mapNotNull { it.id }
+        .filter { it.isNotBlank() }
+        .distinct()
+    } catch (e: Exception) {
+      if (isMissingTableError(e, "student_paper_evaluations")) {
+        emptyList()
+      } else {
+        throw e
+      }
+    }
+
+    if (evalIds.isNotEmpty()) {
+      try {
+        SupabaseClientProvider.client.postgrest["student_paper_evaluation_questions"]
+          .delete {
+            filter {
+              isIn("evaluation_id", evalIds)
+            }
+          }
+      } catch (e: Exception) {
+        if (!isMissingTableError(e, "student_paper_evaluation_questions")) {
+          throw e
+        }
+      }
+    }
+
+    try {
+      SupabaseClientProvider.client.postgrest["student_paper_evaluations"]
+        .delete {
+          filter {
+            isIn("paper_id", validPaperIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+    } catch (e: Exception) {
+      if (!isMissingTableError(e, "student_paper_evaluations")) {
+        throw e
+      }
+    }
+  }
+
+  suspend fun deletePaperChildRecords(
+    paperIds: List<String>,
+    teacherId: String,
+  ) {
+    val validPaperIds = paperIds.filter { it.isNotBlank() }.distinct()
+    if (validPaperIds.isEmpty()) return
+
+    deleteEvaluationRecordsForPapers(validPaperIds, teacherId)
+
+    SupabaseClientProvider.client.postgrest["student_paper_pages"]
+      .delete {
+        filter {
+          isIn("paper_id", validPaperIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+  }
+
+  suspend fun deleteStudentChildRecords(
+    studentIds: List<String>,
+    teacherId: String,
+  ) {
+    val validStudentIds = studentIds.filter { it.isNotBlank() }.distinct()
+    if (validStudentIds.isEmpty()) return
+
+    val paperIds = SupabaseClientProvider.client.postgrest["student_papers"]
+      .select(Columns.list("id")) {
+        filter {
+          isIn("student_id", validStudentIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+      .decodeList<IdRow>()
+      .mapNotNull { it.id }
+      .filter { it.isNotBlank() }
+      .distinct()
+
+    if (paperIds.isNotEmpty()) {
+      deletePaperChildRecords(paperIds, teacherId)
+    }
+
+    SupabaseClientProvider.client.postgrest["student_paper_pages"]
+      .delete {
+        filter {
+          isIn("student_id", validStudentIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+
+    SupabaseClientProvider.client.postgrest["student_papers"]
+      .delete {
+        filter {
+          isIn("student_id", validStudentIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+  }
+
+  suspend fun deleteClassChildRecords(
+    classIds: List<String>,
+    teacherId: String,
+  ) {
+    val validClassIds = classIds.filter { it.isNotBlank() }.distinct()
+    if (validClassIds.isEmpty()) return
+
+    val studentIds = SupabaseClientProvider.client.postgrest["students"]
+      .select(Columns.list("id")) {
+        filter {
+          isIn("class_id", validClassIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+      .decodeList<IdRow>()
+      .mapNotNull { it.id }
+      .filter { it.isNotBlank() }
+      .distinct()
+
+    val papersInClasses = SupabaseClientProvider.client.postgrest["student_papers"]
+      .select(Columns.list("id")) {
+        filter {
+          isIn("class_id", validClassIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+      .decodeList<IdRow>()
+      .mapNotNull { it.id }
+      .filter { it.isNotBlank() }
+
+    val papersByStudents = if (studentIds.isNotEmpty()) {
+      SupabaseClientProvider.client.postgrest["student_papers"]
+        .select(Columns.list("id")) {
+          filter {
+            isIn("student_id", studentIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<IdRow>()
+        .mapNotNull { it.id }
+        .filter { it.isNotBlank() }
+    } else {
+      emptyList()
+    }
+
+    val paperIds = (papersInClasses + papersByStudents).distinct()
+    if (paperIds.isNotEmpty()) {
+      deletePaperChildRecords(paperIds, teacherId)
+    }
+
+    if (studentIds.isNotEmpty()) {
+      SupabaseClientProvider.client.postgrest["student_paper_pages"]
+        .delete {
+          filter {
+            isIn("student_id", studentIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+
+      SupabaseClientProvider.client.postgrest["student_papers"]
+        .delete {
+          filter {
+            isIn("student_id", studentIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+    }
+
+    SupabaseClientProvider.client.postgrest["student_papers"]
+      .delete {
+        filter {
+          isIn("class_id", validClassIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+
+    SupabaseClientProvider.client.postgrest["students"]
+      .delete {
+        filter {
+          isIn("class_id", validClassIds)
+          eq("teacher_id", teacherId)
+        }
+      }
+
+    try {
+      SupabaseClientProvider.client.postgrest["class_question_paper_pages"]
+        .delete {
+          filter {
+            isIn("class_id", validClassIds)
+            eq("teacher_id", teacherId)
+          }
+        }
+    } catch (e: Exception) {
+      if (!isMissingTableError(e, "class_question_paper_pages")) {
+        throw e
+      }
+    }
+  }
+}
 
 interface PaperRepository {
   suspend fun getPapersByStudentId(studentId: String): Result<List<StudentPaper>>
@@ -30,6 +553,8 @@ interface PaperRepository {
     onProgress: (current: Int, total: Int) -> Unit,
   ): Result<StudentPaper>
   suspend fun deletePaper(paper: StudentPaper): Result<Unit>
+  suspend fun deletePaperPage(page: StudentPaperPage): Result<Unit> =
+    Result.failure(UnsupportedOperationException("deletePaperPage is not implemented"))
   suspend fun getSignedPageUrl(storagePath: String, expiresInSeconds: Long = 900): Result<String>
 }
 
@@ -37,7 +562,7 @@ class SupabasePaperRepository(
   private val authRepository: AuthRepository,
 ) : PaperRepository {
   private val TAG = "PaperRepository"
-  private val BUCKET_NAME = "student-papers"
+  private val BUCKET_NAME = StorageCleanupHelper.STUDENT_PAPERS_BUCKET
 
   override suspend fun getPapersByStudentId(studentId: String): Result<List<StudentPaper>> =
     withContext(Dispatchers.IO) {
@@ -215,16 +740,50 @@ class SupabasePaperRepository(
         val paperId = paper.id
           ?: return@withContext Result.failure(IllegalArgumentException("Cannot delete paper without ID"))
 
-        // 1. Delete database record with verification
-        val deletedRows = SupabaseClientProvider.client.postgrest["student_papers"]
-          .delete {
-            select()
+        // 1. Verify paper exists and belongs to the authenticated teacher before touching Storage
+        val existingPaper = SupabaseClientProvider.client.postgrest["student_papers"]
+          .select(Columns.list("id")) {
             filter {
               eq("id", paperId)
               eq("teacher_id", teacherId)
             }
           }
-          .decodeList<StudentPaper>()
+          .decodeList<IdRow>()
+
+        if (existingPaper.isEmpty()) {
+          return@withContext Result.failure(
+            IllegalStateException("Paper deletion failed. Paper was not found or permission denied.")
+          )
+        }
+
+        // 2. Collect all page storage paths (from DB + in-memory paper) BEFORE deleting DB rows
+        val storagePaths = StorageCleanupHelper.collectStudentPaperPathsForPaper(
+          paperId = paperId,
+          teacherId = teacherId,
+          inMemoryPaths = paper.pages.map { it.storagePath },
+        )
+
+        // 3. Delete files from Supabase Storage FIRST. If Storage fails, abort so DB records remain intact for retry.
+        StorageCleanupHelper.deleteFromBucket(
+          bucketName = BUCKET_NAME,
+          rawPaths = storagePaths,
+        )
+
+        // 4. Delete associated child records (evaluation questions, evaluations, pages) and parent paper record
+        StorageCleanupHelper.deletePaperChildRecords(
+          paperIds = listOf(paperId),
+          teacherId = teacherId,
+        )
+
+        val deletedRows = SupabaseClientProvider.client.postgrest["student_papers"]
+          .delete {
+            select(Columns.list("id"))
+            filter {
+              eq("id", paperId)
+              eq("teacher_id", teacherId)
+            }
+          }
+          .decodeList<IdRow>()
 
         if (deletedRows.isEmpty()) {
           return@withContext Result.failure(
@@ -232,19 +791,191 @@ class SupabasePaperRepository(
           )
         }
 
-        // 2. Explicitly delete files from private Storage (not relying solely on cascade)
-        val storagePaths = paper.pages.map { it.storagePath }
-        if (storagePaths.isNotEmpty()) {
-          try {
-            SupabaseClientProvider.client.storage[BUCKET_NAME].delete(storagePaths)
-          } catch (storageError: Exception) {
-            Log.w(TAG, "Storage deletion failed during paper delete: ${storageError.message}")
+        Result.success(Unit)
+      } catch (e: Exception) {
+        Log.e(TAG, "Error deleting paper", e)
+        Result.failure(e)
+      }
+    }
+
+  override suspend fun deletePaperPage(page: StudentPaperPage): Result<Unit> =
+    withContext(Dispatchers.IO) {
+      try {
+        if (!SupabaseClientProvider.isConfigured()) {
+          return@withContext Result.failure(IllegalStateException("Supabase is not configured yet."))
+        }
+
+        val teacherId = authRepository.getCurrentUserId()
+          ?: return@withContext Result.failure(IllegalStateException("Teacher is not authenticated."))
+
+        val paperId = page.paperId
+        if (paperId.isBlank()) {
+          return@withContext Result.failure(IllegalArgumentException("Cannot delete page without paperId."))
+        }
+
+        // 1. Verify parent paper ownership before touching Storage
+        val existingPapers = SupabaseClientProvider.client.postgrest["student_papers"]
+          .select(Columns.list("id")) {
+            filter {
+              eq("id", paperId)
+              eq("teacher_id", teacherId)
+            }
+          }
+          .decodeList<IdRow>()
+
+        if (existingPapers.isEmpty()) {
+          return@withContext Result.failure(
+            IllegalStateException("Page deletion failed. Parent paper was not found or permission denied.")
+          )
+        }
+
+        // 2. Fetch all pages for this paper owned by the authenticated teacher and locate the target page
+        val allPaperPages = SupabaseClientProvider.client.postgrest["student_paper_pages"]
+          .select {
+            filter {
+              eq("paper_id", paperId)
+              eq("teacher_id", teacherId)
+            }
+            order("page_number", order = Order.ASCENDING)
+          }
+          .decodeList<StudentPaperPage>()
+
+        val targetPage = if (!page.id.isNullOrBlank()) {
+          allPaperPages.firstOrNull { it.id == page.id }
+        } else {
+          allPaperPages.firstOrNull { it.pageNumber == page.pageNumber }
+        } ?: return@withContext Result.failure(
+          IllegalStateException("Page deletion failed. Page was not found or permission denied.")
+        )
+
+        val targetPageId = targetPage.id
+        if (targetPageId.isNullOrBlank()) {
+          return@withContext Result.failure(
+            IllegalStateException("Page deletion failed. Target page record is missing an ID.")
+          )
+        }
+
+        val storagePaths = StorageCleanupHelper.normalizeStoragePaths(
+          listOf(targetPage.storagePath, page.storagePath),
+          BUCKET_NAME,
+        )
+
+        // 3. Delete only this page's file from Supabase Storage FIRST.
+        // No database records have been mutated yet, so if Storage fails, all DB state remains intact.
+        StorageCleanupHelper.deleteFromBucket(
+          bucketName = BUCKET_NAME,
+          rawPaths = storagePaths,
+        )
+
+        // 4. Delete DB record(s), clear outdated evaluations, and keep page_number (1..N) & total_pages consistent
+        if (allPaperPages.size <= 1) {
+          // Last page of the paper: remove child records and the parent paper record
+          StorageCleanupHelper.deletePaperChildRecords(
+            paperIds = listOf(paperId),
+            teacherId = teacherId,
+          )
+
+          val deletedPapers = SupabaseClientProvider.client.postgrest["student_papers"]
+            .delete {
+              select(Columns.list("id"))
+              filter {
+                eq("id", paperId)
+                eq("teacher_id", teacherId)
+              }
+            }
+            .decodeList<IdRow>()
+
+          if (deletedPapers.isEmpty()) {
+            return@withContext Result.failure(
+              IllegalStateException("Page deletion failed. Parent paper was not found or permission denied.")
+            )
+          }
+        } else {
+          val deletedPages = SupabaseClientProvider.client.postgrest["student_paper_pages"]
+            .delete {
+              select(Columns.list("id"))
+              filter {
+                eq("id", targetPageId)
+                eq("paper_id", paperId)
+                eq("teacher_id", teacherId)
+              }
+            }
+            .decodeList<IdRow>()
+
+          if (deletedPages.isEmpty()) {
+            return@withContext Result.failure(
+              IllegalStateException("Page deletion failed. Page was not found or permission denied.")
+            )
+          }
+
+          // Clear any existing evaluation for this paper since paper content has changed
+          StorageCleanupHelper.deleteEvaluationRecordsForPapers(
+            paperIds = listOf(paperId),
+            teacherId = teacherId,
+          )
+
+          val remainingPages = allPaperPages
+            .filterNot { it.id == targetPageId }
+            .sortedBy { it.pageNumber }
+
+          // Resequence remaining pages to continuous 1..N as required by process-and-grade-paper
+          remainingPages.forEachIndexed { index, remainingPage ->
+            val expectedPageNumber = index + 1
+            val remainingPageId = remainingPage.id
+            if (remainingPage.pageNumber != expectedPageNumber && !remainingPageId.isNullOrBlank()) {
+              val updatedPageRows = SupabaseClientProvider.client.postgrest["student_paper_pages"]
+                .update(
+                  buildJsonObject {
+                    put("page_number", expectedPageNumber)
+                  }
+                ) {
+                  select(Columns.list("id"))
+                  filter {
+                    eq("id", remainingPageId)
+                    eq("paper_id", paperId)
+                    eq("teacher_id", teacherId)
+                  }
+                }
+                .decodeList<IdRow>()
+
+              if (updatedPageRows.isEmpty()) {
+                return@withContext Result.failure(
+                  IllegalStateException("Failed to resequence remaining paper pages after deletion.")
+                )
+              }
+            }
+          }
+
+          val newTotalPages = remainingPages.size.coerceAtLeast(1)
+          val updatedPapers = SupabaseClientProvider.client.postgrest["student_papers"]
+            .update(
+              buildJsonObject {
+                put("total_pages", newTotalPages)
+                put("status", "scanned")
+                put("ocr_status", "pending")
+                put("combined_ocr_text", JsonNull)
+                put("ocr_completed_at", JsonNull)
+                put("ocr_error", JsonNull)
+              }
+            ) {
+              select(Columns.list("id"))
+              filter {
+                eq("id", paperId)
+                eq("teacher_id", teacherId)
+              }
+            }
+            .decodeList<IdRow>()
+
+          if (updatedPapers.isEmpty()) {
+            return@withContext Result.failure(
+              IllegalStateException("Failed to update total_pages on student paper.")
+            )
           }
         }
 
         Result.success(Unit)
       } catch (e: Exception) {
-        Log.e(TAG, "Error deleting paper", e)
+        Log.e(TAG, "Error deleting paper page", e)
         Result.failure(e)
       }
     }

@@ -5,6 +5,7 @@ import com.example.data.model.CreateStudentRequest
 import com.example.data.model.Student
 import com.example.data.remote.SupabaseClientProvider
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -146,15 +147,49 @@ class SupabaseStudentRepository(
         val teacherId = authRepository.getCurrentUserId()
           ?: return@withContext Result.failure(IllegalStateException("Teacher is not authenticated."))
 
-        val deletedRows = SupabaseClientProvider.client.postgrest["students"]
-          .delete {
-            select()
+        // 1. Verify student exists and belongs to the authenticated teacher before touching Storage
+        val existingStudent = SupabaseClientProvider.client.postgrest["students"]
+          .select(Columns.list("id")) {
             filter {
               eq("id", studentId)
               eq("teacher_id", teacherId)
             }
           }
-          .decodeList<Student>()
+          .decodeList<IdRow>()
+
+        if (existingStudent.isEmpty()) {
+          return@withContext Result.failure(
+            IllegalStateException("Deletion failed. The student was not found or access was denied.")
+          )
+        }
+
+        // 2. Collect all answer-sheet page paths for this student BEFORE database deletion
+        val studentPaperPaths = StorageCleanupHelper.collectStudentPaperPathsForStudent(
+          studentId = studentId,
+          teacherId = teacherId,
+        )
+
+        // 3. Delete all uploaded page images from student-papers bucket FIRST
+        StorageCleanupHelper.deleteFromBucket(
+          bucketName = StorageCleanupHelper.STUDENT_PAPERS_BUCKET,
+          rawPaths = studentPaperPaths,
+        )
+
+        // 4. Delete associated child records (evaluation questions, evaluations, pages, papers) and student record
+        StorageCleanupHelper.deleteStudentChildRecords(
+          studentIds = listOf(studentId),
+          teacherId = teacherId,
+        )
+
+        val deletedRows = SupabaseClientProvider.client.postgrest["students"]
+          .delete {
+            select(Columns.list("id"))
+            filter {
+              eq("id", studentId)
+              eq("teacher_id", teacherId)
+            }
+          }
+          .decodeList<IdRow>()
 
         if (deletedRows.isEmpty()) {
           return@withContext Result.failure(

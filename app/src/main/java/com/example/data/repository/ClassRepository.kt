@@ -6,6 +6,7 @@ import com.example.data.model.ClassTiming
 import com.example.data.model.CreateClassRequest
 import com.example.data.remote.SupabaseClientProvider
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.Dispatchers
@@ -32,7 +33,7 @@ class SupabaseClassRepository(
   private val authRepository: AuthRepository,
 ) : ClassRepository {
   private val TAG = "ClassRepository"
-  private val BUCKET_NAME = "question-papers"
+  private val BUCKET_NAME = StorageCleanupHelper.QUESTION_PAPERS_BUCKET
 
   override suspend fun getClassesByExamId(examId: String): Result<List<ClassRoom>> =
     withContext(Dispatchers.IO) {
@@ -134,11 +135,21 @@ class SupabaseClassRepository(
         questionPaperPath = questionPaperStoragePath,
       )
 
-      val insertedClass = SupabaseClientProvider.client.postgrest["classes"]
-        .insert(request) {
-          select()
+      val insertedClass = try {
+        SupabaseClientProvider.client.postgrest["classes"]
+          .insert(request) {
+            select()
+          }
+          .decodeSingle<ClassRoom>()
+      } catch (dbError: Exception) {
+        if (!questionPaperStoragePath.isNullOrBlank()) {
+          runCatching {
+            SupabaseClientProvider.client.storage.from(BUCKET_NAME)
+              .delete(listOf(questionPaperStoragePath))
+          }
         }
-        .decodeSingle<ClassRoom>()
+        throw dbError
+      }
 
       Result.success(insertedClass)
     } catch (e: Exception) {
@@ -158,13 +169,63 @@ class SupabaseClassRepository(
       val teacherId = authRepository.getCurrentUserId()
         ?: return@withContext Result.failure(IllegalStateException("Teacher is not authenticated."))
 
-      SupabaseClientProvider.client.postgrest["classes"]
-        .delete {
+      // 1. Fetch class record to verify ownership and obtain question_paper_path BEFORE cascade deletion
+      val classRows = SupabaseClientProvider.client.postgrest["classes"]
+        .select(Columns.list("id", "question_paper_path")) {
           filter {
             eq("id", id)
             eq("teacher_id", teacherId)
           }
         }
+        .decodeList<ClassStorageProjection>()
+
+      if (classRows.isEmpty()) {
+        return@withContext Result.failure(
+          IllegalStateException("Deletion failed. The class was not found or access was denied.")
+        )
+      }
+
+      // 2. Collect and delete all student paper page images for this class from student-papers bucket FIRST
+      val studentPaperPaths = StorageCleanupHelper.collectStudentPaperPathsForClasses(
+        classIds = listOf(id),
+        teacherId = teacherId,
+      )
+      StorageCleanupHelper.deleteFromBucket(
+        bucketName = StorageCleanupHelper.STUDENT_PAPERS_BUCKET,
+        rawPaths = studentPaperPaths,
+      )
+
+      // 3. Collect and delete question paper file(s) for this class from question-papers bucket FIRST
+      val questionPaperPaths = StorageCleanupHelper.collectQuestionPaperPathsForClasses(
+        classRooms = classRows,
+        teacherId = teacherId,
+      )
+      StorageCleanupHelper.deleteFromBucket(
+        bucketName = BUCKET_NAME,
+        rawPaths = questionPaperPaths,
+      )
+
+      // 4. Delete associated child records and class database record
+      StorageCleanupHelper.deleteClassChildRecords(
+        classIds = listOf(id),
+        teacherId = teacherId,
+      )
+
+      val deletedClasses = SupabaseClientProvider.client.postgrest["classes"]
+        .delete {
+          select(Columns.list("id"))
+          filter {
+            eq("id", id)
+            eq("teacher_id", teacherId)
+          }
+        }
+        .decodeList<IdRow>()
+
+      if (deletedClasses.isEmpty()) {
+        return@withContext Result.failure(
+          IllegalStateException("Deletion failed. The class was not found or access was denied.")
+        )
+      }
 
       Result.success(Unit)
     } catch (e: Exception) {
