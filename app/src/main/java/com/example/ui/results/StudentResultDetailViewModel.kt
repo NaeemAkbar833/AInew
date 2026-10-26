@@ -10,6 +10,7 @@ import com.example.data.model.EvaluationQuestion
 import com.example.data.model.QuestionDbRecord
 import com.example.data.model.Student
 import com.example.data.model.StudentPaper
+import com.example.data.model.calculateEffectiveQuestionTotalMarks
 import com.example.data.remote.SupabaseClientProvider
 import com.example.data.repository.ClassRepository
 import com.example.data.repository.StudentRepository
@@ -92,7 +93,7 @@ class StudentResultDetailViewModel(
                 status = evalRecord.status,
                 totalMarksObtained = evalRecord.totalMarksObtained,
                 totalMarks = evalRecord.totalMarks,
-                extractedQuestionTotalMarks = questionRecords.sumOf { it.maximumMarks },
+                extractedQuestionTotalMarks = calculateEffectiveQuestionTotalMarks(questionRecords),
                 percentage = evalRecord.percentage,
                 percentageAvailable = evalRecord.percentage != null,
                 reviewRequired = evalRecord.reviewRequired,

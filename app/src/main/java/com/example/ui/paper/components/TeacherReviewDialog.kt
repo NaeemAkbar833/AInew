@@ -77,6 +77,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AiEvaluationResponse
 import com.example.data.model.EvaluationQuestion
+import com.example.data.model.calculateCountedEvaluationTotalMarks
+import com.example.data.model.calculateEffectiveEvaluationQuestionTotalMarks
+import com.example.data.model.isQuestionUnattemptedForScoring
+import com.example.data.model.sortEvaluationQuestionsNumerically
+import com.example.data.model.stripSelectionRuleTagFromCriteria
 import com.example.ui.theme.BorderGray
 import com.example.ui.theme.BricolageGrotesqueFontFamily
 import com.example.ui.theme.DarkRoyalBlue
@@ -121,7 +126,10 @@ fun TeacherReviewDialog(
   val maxSheetHeight = (configuration.screenHeightDp * 0.84f).dp
 
   val evaluation = evaluationResponse.evaluation
-  val questions = editedQuestions ?: evaluation?.questions.orEmpty()
+  val rawQuestions = editedQuestions ?: evaluation?.questions.orEmpty()
+  val questions = remember(rawQuestions) {
+    sortEvaluationQuestionsNumerically(rawQuestions)
+  }
   val isApproved = evaluation?.status == "approved" || evaluationResponse.status == "approved"
   val isReviewRequired = !isApproved && (
     evaluation?.reviewRequired == true ||
@@ -131,12 +139,12 @@ fun TeacherReviewDialog(
   val hasUnsavedEdits = editedQuestions != null && !isApproved
   val isBusy = isApproving || isSavingCorrections
 
+  val totalPossible = evaluation?.totalMarks ?: calculateEffectiveEvaluationQuestionTotalMarks(questions)
   val liveTotalObtained = if (editedQuestions != null) {
-    editedQuestions.sumOf { it.awardedMarks ?: 0.0 }
+    calculateCountedEvaluationTotalMarks(questions, totalPossible)
   } else {
-    evaluation?.totalMarksObtained ?: questions.sumOf { it.awardedMarks ?: 0.0 }
+    evaluation?.totalMarksObtained ?: calculateCountedEvaluationTotalMarks(questions, totalPossible)
   }
-  val totalPossible = evaluation?.totalMarks ?: questions.sumOf { it.maximumMarks ?: 0.0 }
 
   val headerGradient = Brush.linearGradient(
     colors = listOf(RoyalBlue, DarkRoyalBlue)
@@ -576,9 +584,10 @@ fun TeacherReviewDialog(
                   modifier = Modifier.weight(1f),
                 )
               }
-              val pct = if (totalPossible > 0.0 && (evaluation?.percentageAvailable == true || editedQuestions != null)) {
-                String.format(Locale.US, "%.1f%%", (liveTotalObtained / totalPossible) * 100.0)
-              } else if (evaluation?.percentageAvailable == true && evaluation.percentage != null) {
+              val pct = if (evaluation?.percentageAvailable == true && totalPossible > 0.0) {
+                val pctValue = (liveTotalObtained / totalPossible) * 100.0
+                String.format(Locale.US, "%.1f%%", pctValue)
+              } else if (evaluation?.percentage != null) {
                 String.format(Locale.US, "%.1f%%", evaluation.percentage)
               } else {
                 "N/A"
@@ -914,9 +923,13 @@ private fun QuestionReviewCard(
     mutableStateOf(question.feedback.orEmpty())
   }
   var marksError by remember { mutableStateOf<String?>(null) }
+  var editAttemptCounter by remember { mutableStateOf(0) }
 
-  LaunchedEffect(question.awardedMarks, question.feedback) {
-    marksInput = formatMarks(question.awardedMarks ?: 0.0)
+  LaunchedEffect(question.awardedMarks, question.feedback, editAttemptCounter) {
+    val acceptedMarks = question.awardedMarks ?: 0.0
+    if (editAttemptCounter == 0 || marksInput.trim().toDoubleOrNull() != acceptedMarks) {
+      marksInput = formatMarks(acceptedMarks)
+    }
     feedbackInput = question.feedback.orEmpty()
   }
 
@@ -1209,7 +1222,8 @@ private fun QuestionReviewCard(
                 )
               }
             }
-            if (!question.markingCriteria.isNullOrBlank()) {
+            val displayCriteria = stripSelectionRuleTagFromCriteria(question.markingCriteria)
+            if (displayCriteria.isNotBlank()) {
               Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                   text = "Marking Criteria",
@@ -1219,7 +1233,7 @@ private fun QuestionReviewCard(
                   color = RoyalBlue,
                 )
                 Text(
-                  text = question.markingCriteria,
+                  text = displayCriteria,
                   fontFamily = FigtreeFontFamily,
                   fontSize = 12.sp,
                   color = TextSecondary,
@@ -1278,7 +1292,11 @@ private fun QuestionReviewCard(
               Surface(
                 shape = RoundedCornerShape(6.dp),
                 color = RoyalBlue,
-                modifier = Modifier.clickable { isEditing = false },
+                modifier = Modifier.clickable {
+                  isEditing = false
+                  marksError = null
+                  marksInput = formatMarks(awarded)
+                },
               ) {
                 Text(
                   text = "Done",
@@ -1298,10 +1316,13 @@ private fun QuestionReviewCard(
                 val parsed = input.trim().toDoubleOrNull()
                 if (parsed == null) {
                   marksError = "Enter a valid number"
-                } else if (parsed < 0.0 || (maxMarks > 0.0 && parsed > maxMarks)) {
+                } else if (parsed < 0.0 || (maxMarks > 0.0 && parsed > maxMarks) || (maxMarks <= 0.0 && parsed > 0.0)) {
                   marksError = "Marks must be between 0 and ${formatMarks(maxMarks)}"
+                } else if (isQuestionUnattemptedForScoring(question) && parsed > 0.0) {
+                  marksError = "Cannot award marks to an unattempted question"
                 } else {
                   marksError = null
+                  editAttemptCounter++
                   onUpdate(parsed, feedbackInput)
                 }
               },
@@ -1351,8 +1372,7 @@ private fun QuestionReviewCard(
               value = feedbackInput,
               onValueChange = { updatedFeedback ->
                 feedbackInput = updatedFeedback
-                val parsedMarks = marksInput.trim().toDoubleOrNull() ?: awarded
-                onUpdate(parsedMarks, updatedFeedback)
+                onUpdate(awarded, updatedFeedback)
               },
               label = { Text("Feedback", fontFamily = FigtreeFontFamily, fontSize = 11.5.sp) },
               minLines = 2,

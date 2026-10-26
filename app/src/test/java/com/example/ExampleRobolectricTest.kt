@@ -7,13 +7,24 @@ import com.example.data.model.AiEvaluationResponse
 import com.example.data.model.ClassRoom
 import com.example.data.model.ClassTiming
 import com.example.data.model.EvaluationDetail
+import com.example.data.model.EvaluationQuestion
 import com.example.data.model.EvaluationStatus
 import com.example.data.model.Exam
 import com.example.data.model.ExamType
+import com.example.data.model.QuestionDbRecord
 import com.example.data.model.Student
 import com.example.data.model.ExtractedStudent
 import com.example.data.model.StudentPaper
 import com.example.data.model.StudentPaperPage
+import com.example.data.model.MarkEditValidationResult
+import com.example.data.model.calculateCountedEvaluationTotalMarks
+import com.example.data.model.calculateEffectiveEvaluationQuestionTotalMarks
+import com.example.data.model.calculateEffectiveQuestionTotalMarks
+import com.example.data.model.compareQuestionNumbers
+import com.example.data.model.parseAiEvaluationResponse
+import com.example.data.model.sortEvaluationQuestionsNumerically
+import com.example.data.model.validatePaperEvaluationForSave
+import com.example.data.model.validateQuestionMarkEdit
 import com.example.data.repository.AuthRepository
 import com.example.data.repository.ClassRepository
 import com.example.data.repository.ExamRepository
@@ -1521,5 +1532,958 @@ class ExampleRobolectricTest {
     assertNull(examViewModel.uiState.value.deleteErrorMessage)
     assertTrue(examViewModel.uiState.value.exams.isEmpty())
   }
-}
 
+  @Test
+  fun testCrossPageVerbatimStudentAnswerAndEqualMarks4x20Parsing() {
+    val page1Verbatim = "Deadlock occurs when a set of processes are blocked because each process holds a resource"
+    val page2ContinuationVerbatim = "and waits for another resource acquired by some other process in the same set."
+    val expectedCombinedVerbatim = "$page1Verbatim\\n\\n$page2ContinuationVerbatim"
+
+    val json = """
+      {
+        "status": "completed",
+        "percentageAvailable": true,
+        "evaluation": {
+          "id": "eval-equal-80",
+          "paperId": "paper-equal-80",
+          "studentId": "student-1",
+          "classId": "class-equal-80",
+          "teacherId": "teacher-1",
+          "status": "completed",
+          "totalMarksObtained": 72,
+          "totalMarks": 80,
+          "extractedQuestionTotalMarks": 80,
+          "percentage": 90.0,
+          "percentageAvailable": true,
+          "reviewRequired": false,
+          "reviewReason": null,
+          "questions": [
+            {
+              "question_number": "1",
+              "question_text": "Define deadlock and its four necessary conditions.",
+              "maximum_marks": 20,
+              "student_answer": "$expectedCombinedVerbatim",
+              "expected_answer": "[Provisional Reference Answer]: Deadlock is a state where processes are blocked waiting on each other...",
+              "marking_criteria": "[Provisional Criteria]: - Definition: 8 marks\\n- Four conditions: 12 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 18,
+              "feedback": "Clear definition spanning pages 1 and 2.",
+              "review_required": false,
+              "review_reason": null
+            },
+            {
+              "question_number": "2",
+              "question_text": "Explain paging vs segmentation.",
+              "maximum_marks": 20,
+              "student_answer": "Paging divides memory into fixed-size frames whereas segmentation uses logical variable-sized segments.",
+              "expected_answer": "[Provisional Reference Answer]: Paging vs segmentation...",
+              "marking_criteria": "[Provisional Criteria]: - Paging: 10 marks\\n- Segmentation: 10 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 18,
+              "feedback": "Good comparison.",
+              "review_required": false,
+              "review_reason": null
+            },
+            {
+              "question_number": "3",
+              "question_text": "Explain virtual memory and page faults.",
+              "maximum_marks": 20,
+              "student_answer": "Virtual memory allows execution of processes not completely in main memory.",
+              "expected_answer": "[Provisional Reference Answer]: Virtual memory...",
+              "marking_criteria": "[Provisional Criteria]: - Virtual memory: 10 marks\\n- Page faults: 10 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 16,
+              "feedback": "Covered virtual memory concept.",
+              "review_required": false,
+              "review_reason": null
+            },
+            {
+              "question_number": "4",
+              "question_text": "Describe disk scheduling algorithms.",
+              "maximum_marks": 20,
+              "student_answer": "FCFS, SSTF, SCAN, and C-SCAN schedule disk head movement.",
+              "expected_answer": "[Provisional Reference Answer]: Disk scheduling...",
+              "marking_criteria": "[Provisional Criteria]: - Each algorithm: 5 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 20,
+              "feedback": "All four algorithms explained.",
+              "review_required": false,
+              "review_reason": null
+            }
+          ]
+        }
+      }
+    """.trimIndent()
+
+    val parsed = parseAiEvaluationResponse(json)
+    assertNotNull(parsed)
+    val eval = parsed!!.evaluation!!
+    assertEquals(80.0, eval.totalMarks!!, 0.001)
+    assertEquals(80.0, eval.extractedQuestionTotalMarks!!, 0.001)
+    assertEquals(72.0, eval.totalMarksObtained!!, 0.001)
+    assertEquals(90.0, eval.percentage!!, 0.001)
+    assertTrue(eval.percentageAvailable)
+    assertFalse(eval.reviewRequired)
+    assertEquals(4, eval.questions.size)
+    assertTrue(eval.questions.all { it.maximumMarks == 20.0 })
+
+    val q1 = eval.questions.first()
+    assertFalse(q1.studentAnswer!!.startsWith("Q1"))
+    assertFalse(q1.studentAnswer!!.startsWith("[Page"))
+    assertTrue(q1.studentAnswer!!.contains(page1Verbatim))
+    assertTrue(q1.studentAnswer!!.contains(page2ContinuationVerbatim))
+  }
+
+  @Test
+  fun testRandomOrderQuestionsSeparationAndNoQuestionLabelsInStudentAnswer() {
+    val json = """
+      {
+        "status": "needs_review",
+        "percentageAvailable": false,
+        "evaluation": {
+          "id": "eval-random-order",
+          "paperId": "paper-random-order",
+          "studentId": "student-1",
+          "classId": "class-1",
+          "teacherId": "teacher-1",
+          "status": "needs_review",
+          "totalMarksObtained": 55,
+          "totalMarks": 80,
+          "extractedQuestionTotalMarks": 80,
+          "percentage": null,
+          "percentageAvailable": false,
+          "reviewRequired": true,
+          "reviewReason": "Evaluation requires teacher review before final percentage calculation.",
+          "questions": [
+            {
+              "question_number": "1",
+              "question_text": "Explain photosynthesis.",
+              "maximum_marks": 20,
+              "student_answer": "Photosynthesis converts light energy into chemical energy in chloroplasts.",
+              "expected_answer": "[Provisional Reference Answer]: Photosynthesis...",
+              "marking_criteria": "[Provisional Criteria]: 20 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 18,
+              "feedback": "Well explained.",
+              "review_required": false,
+              "review_reason": null
+            },
+            {
+              "question_number": "2",
+              "question_text": "Explain cellular respiration.",
+              "maximum_marks": 20,
+              "student_answer": "[No answer detected]",
+              "expected_answer": "[Provisional Reference Answer]: Cellular respiration...",
+              "marking_criteria": "[Provisional Criteria]: 20 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 0,
+              "feedback": "0 marks awarded: No student answer was found for this compulsory question.",
+              "review_required": true,
+              "review_reason": "Student did not attempt this compulsory question."
+            },
+            {
+              "question_number": "3",
+              "question_text": "Describe mitosis.",
+              "maximum_marks": 20,
+              "student_answer": "Mitosis is somatic cell division producing two genetically identical diploid daughter cells.",
+              "expected_answer": "[Provisional Reference Answer]: Mitosis...",
+              "marking_criteria": "[Provisional Criteria]: 20 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 19,
+              "feedback": "Accurate description.",
+              "review_required": false,
+              "review_reason": null
+            },
+            {
+              "question_number": "4",
+              "question_text": "Define osmosis and boiling point of water.",
+              "maximum_marks": 20,
+              "student_answer": "100°C is the boiling point of water at standard pressure, and osmosis is water diffusion across a semipermeable membrane.",
+              "expected_answer": "[Provisional Reference Answer]: Osmosis...",
+              "marking_criteria": "[Provisional Criteria]: 20 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 18,
+              "feedback": "Correct definition and numeric value.",
+              "review_required": false,
+              "review_reason": null
+            }
+          ]
+        }
+      }
+    """.trimIndent()
+
+    val parsed = parseAiEvaluationResponse(json)
+    assertNotNull(parsed)
+    val questions = parsed!!.evaluation!!.questions
+    assertEquals(4, questions.size)
+
+    val q1 = questions.first { it.questionNumber == "1" }
+    val q2 = questions.first { it.questionNumber == "2" }
+    val q3 = questions.first { it.questionNumber == "3" }
+    val q4 = questions.first { it.questionNumber == "4" }
+
+    // Q1 and Q4 remain strictly separate
+    assertEquals("Photosynthesis converts light energy into chemical energy in chloroplasts.", q1.studentAnswer)
+    assertFalse(q1.studentAnswer!!.contains("osmosis"))
+    assertEquals(
+      "100°C is the boiling point of water at standard pressure, and osmosis is water diffusion across a semipermeable membrane.",
+      q4.studentAnswer
+    )
+    // Q2 remains unanswered
+    assertEquals("[No answer detected]", q2.studentAnswer)
+    assertEquals(0.0, q2.awardedMarks!!, 0.001)
+    // No artificial question labels in any answered question
+    for (q in listOf(q1, q3, q4)) {
+      assertFalse(q.studentAnswer!!.startsWith("Q${q.questionNumber}"))
+      assertFalse(q.studentAnswer!!.startsWith("${q.questionNumber}."))
+      assertFalse(q.studentAnswer!!.startsWith("${q.questionNumber})"))
+    }
+  }
+
+  @Test
+  fun testOptionalQuestionsAttempt7OutOf10AndInternalOrChoicesEffectiveMarks() {
+    // 1. "Attempt any 7 out of 10" where each question is 10 marks -> effective exam total is 70, not 100
+    val dbQuestions7Of10 = (1..10).map { i ->
+      val attempted = i <= 7
+      QuestionDbRecord(
+        id = "q-$i",
+        evaluationId = "eval-opt-70",
+        questionNumber = "$i",
+        questionText = "Question $i text",
+        maximumMarks = 10.0,
+        studentAnswer = if (attempted) "Verbatim student answer for Q$i" else "[Optional question — not attempted]",
+        expectedAnswer = "[Provisional Reference Answer]: Reference $i",
+        markingCriteria = "[Selection Rule: group=EXAM_OPTIONAL | attempt=7/10]\n[Provisional Criteria]: - Key point: 10 marks",
+        awardedMarks = if (attempted) 8.0 else 0.0,
+        feedback = if (attempted) "Correct." else "Optional question not attempted by student (7 of 10 required attempts satisfied).",
+        reviewRequired = false,
+        reviewReason = null,
+      )
+    }
+
+    val effectiveTotal7Of10 = calculateEffectiveQuestionTotalMarks(dbQuestions7Of10)
+    assertEquals(70.0, effectiveTotal7Of10, 0.001)
+
+    // 2. Internal OR choice: Q1 (10 marks), Q2(a) (15 marks) OR Q2(b) (15 marks), Q3 (25 marks) -> effective total = 50 marks
+    val orChoiceQuestions = listOf(
+      EvaluationQuestion(
+        questionNumber = "1",
+        questionText = "Compulsory Q1",
+        maximumMarks = 10.0,
+        studentAnswer = "Q1 answer",
+        markingCriteria = "[Provisional Criteria]: 10 marks",
+        awardedMarks = 9.0,
+        reviewRequired = false,
+      ),
+      EvaluationQuestion(
+        questionNumber = "2(a)",
+        questionText = "Option 2(a)",
+        maximumMarks = 15.0,
+        studentAnswer = "Q2(a) answer",
+        markingCriteria = "[Selection Rule: group=OR_Q2 | attempt=1/2 | type=or]\n[Provisional Criteria]: 15 marks",
+        awardedMarks = 13.0,
+        reviewRequired = false,
+      ),
+      EvaluationQuestion(
+        questionNumber = "2(b)",
+        questionText = "Option 2(b)",
+        maximumMarks = 15.0,
+        studentAnswer = "[Optional question — not attempted]",
+        markingCriteria = "[Selection Rule: group=OR_Q2 | attempt=1/2 | type=or]\n[Provisional Criteria]: 15 marks",
+        awardedMarks = 0.0,
+        reviewRequired = false,
+      ),
+      EvaluationQuestion(
+        questionNumber = "3",
+        questionText = "Compulsory Q3",
+        maximumMarks = 25.0,
+        studentAnswer = "Q3 answer",
+        markingCriteria = "[Provisional Criteria]: 25 marks",
+        awardedMarks = 22.0,
+        reviewRequired = false,
+      ),
+    )
+
+    val effectiveTotalOrChoice = calculateEffectiveEvaluationQuestionTotalMarks(orChoiceQuestions)
+    assertEquals(50.0, effectiveTotalOrChoice, 0.001)
+  }
+
+  @Test
+  fun testCrossPageQ4Q5SeparationAndAll12RegressionScenarios() {
+    // Verify Kotlin parsing of cross-page Q4 continuation + Q5 on page 2 with source_pages
+    val json = """
+      {
+        "status": "completed",
+        "percentageAvailable": true,
+        "evaluation": {
+          "id": "eval-q4-q5-page2",
+          "paperId": "paper-q4-q5-page2",
+          "studentId": "student-1",
+          "classId": "class-1",
+          "teacherId": "teacher-1",
+          "status": "completed",
+          "totalMarksObtained": 19,
+          "totalMarks": 20,
+          "extractedQuestionTotalMarks": 20,
+          "percentage": 95.0,
+          "percentageAvailable": true,
+          "reviewRequired": false,
+          "reviewReason": null,
+          "questions": [
+            {
+              "question_number": "4",
+              "question_text": "Explain the causes and impact of the French Revolution.",
+              "maximum_marks": 10,
+              "student_answer": "The French Revolution began in 1789 due to severe financial crisis and social inequality.\n\nIt led to the abolition of feudalism and the Declaration of the Rights of Man.",
+              "expected_answer": "[Provisional Reference Answer]: French Revolution...",
+              "marking_criteria": "[Provisional Criteria]: 10 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 9,
+              "feedback": "Comprehensive two-page answer.",
+              "review_required": false,
+              "review_reason": null,
+              "source_pages": [1, 2]
+            },
+            {
+              "question_number": "5",
+              "question_text": "Explain photosynthesis.",
+              "maximum_marks": 10,
+              "student_answer": "Photosynthesis converts light energy into chemical energy in chloroplasts.",
+              "expected_answer": "[Provisional Reference Answer]: Photosynthesis...",
+              "marking_criteria": "[Provisional Criteria]: 10 marks",
+              "expected_answer_source": "ai_generated",
+              "marking_criteria_source": "ai_generated",
+              "awarded_marks": 10,
+              "feedback": "Accurate answer.",
+              "review_required": false,
+              "review_reason": null,
+              "source_pages": [2]
+            }
+          ]
+        }
+      }
+    """.trimIndent()
+
+    val parsed = parseAiEvaluationResponse(json)
+    assertNotNull(parsed)
+    val eval = parsed!!.evaluation!!
+    val q4 = eval.questions.first { it.questionNumber == "4" }
+    val q5 = eval.questions.first { it.questionNumber == "5" }
+
+    assertEquals(
+      "The French Revolution began in 1789 due to severe financial crisis and social inequality.\n\nIt led to the abolition of feudalism and the Declaration of the Rights of Man.",
+      q4.studentAnswer
+    )
+    assertFalse(q4.studentAnswer!!.contains("Photosynthesis"))
+    assertEquals(
+      "Photosynthesis converts light energy into chemical energy in chloroplasts.",
+      q5.studentAnswer
+    )
+    assertFalse(q5.studentAnswer!!.startsWith("Q5"))
+    assertFalse(q5.studentAnswer!!.startsWith("Ans 5"))
+    assertFalse(q5.studentAnswer!!.startsWith("Answer 5"))
+  }
+
+  @Test
+  fun testSixQuestionsAttemptAnyThreeOutOfOrderAndOverAttemptPreservation() {
+    val sixQuestionsAttempt3 = (1..6).map { num ->
+      val attempted = num in listOf(3, 1, 4)
+      EvaluationQuestion(
+        id = "eq-$num",
+        evaluationId = "eval-attempt-3-of-6",
+        questionNumber = "$num",
+        questionText = "Question $num (10 marks)",
+        maximumMarks = 10.0,
+        studentAnswer = if (attempted) "Student answer for Q$num" else "[Optional question — not attempted]",
+        markingCriteria = "[Selection Rule: group=EXAM_OPTIONAL; attempt=3/6] [Provisional Criteria]: 10 marks",
+        awardedMarks = if (attempted) 9.0 else 0.0,
+        reviewRequired = false,
+      )
+    }
+
+    val effectiveTotal = calculateEffectiveEvaluationQuestionTotalMarks(sixQuestionsAttempt3)
+    assertEquals(30.0, effectiveTotal, 0.001)
+    assertEquals(27.0, sixQuestionsAttempt3.sumOf { it.awardedMarks ?: 0.0 }, 0.001)
+
+    // Verify over-attempt (4 answered out of 3 allowed) preserves all 4 answers and their awarded marks while flagging for review
+    val overAttemptJson = """
+      {
+        "status": "needs_review",
+        "percentageAvailable": false,
+        "evaluation": {
+          "id": "eval-over-attempt-4-of-3",
+          "paperId": "paper-over-attempt",
+          "studentId": "student-1",
+          "classId": "class-1",
+          "teacherId": "teacher-1",
+          "status": "needs_review",
+          "totalMarksObtained": 0,
+          "totalMarks": 30,
+          "extractedQuestionTotalMarks": 30,
+          "percentage": null,
+          "percentageAvailable": false,
+          "reviewRequired": true,
+          "reviewReason": "Student attempted 4 questions in optional group 'EXAM_OPTIONAL' (attempt any 3 of 6) where only 3 are allowed; all detected answers are preserved and flagged for teacher review.",
+          "questions": [
+            {
+              "question_number": "1",
+              "question_text": "Q1",
+              "maximum_marks": 10,
+              "student_answer": "Answer for Q1",
+              "marking_criteria": "[Selection Rule: group=EXAM_OPTIONAL; attempt=3/6] Criteria",
+              "awarded_marks": 9,
+              "review_required": true,
+              "source_pages": [1]
+            },
+            {
+              "question_number": "2",
+              "question_text": "Q2",
+              "maximum_marks": 10,
+              "student_answer": "[Optional question — not attempted]",
+              "marking_criteria": "[Selection Rule: group=EXAM_OPTIONAL; attempt=3/6] Criteria",
+              "awarded_marks": 0,
+              "review_required": false,
+              "source_pages": []
+            },
+            {
+              "question_number": "3",
+              "question_text": "Q3",
+              "maximum_marks": 10,
+              "student_answer": "Answer for Q3",
+              "marking_criteria": "[Selection Rule: group=EXAM_OPTIONAL; attempt=3/6] Criteria",
+              "awarded_marks": 6,
+              "review_required": true,
+              "source_pages": [1]
+            },
+            {
+              "question_number": "4",
+              "question_text": "Q4",
+              "maximum_marks": 10,
+              "student_answer": "Answer for Q4",
+              "marking_criteria": "[Selection Rule: group=EXAM_OPTIONAL; attempt=3/6] Criteria",
+              "awarded_marks": 8,
+              "review_required": true,
+              "source_pages": [2]
+            },
+            {
+              "question_number": "5",
+              "question_text": "Q5",
+              "maximum_marks": 10,
+              "student_answer": "[Optional question — not attempted]",
+              "marking_criteria": "[Selection Rule: group=EXAM_OPTIONAL; attempt=3/6] Criteria",
+              "awarded_marks": 0,
+              "review_required": false,
+              "source_pages": []
+            },
+            {
+              "question_number": "6",
+              "question_text": "Q6",
+              "maximum_marks": 10,
+              "student_answer": "Answer for Q6",
+              "marking_criteria": "[Selection Rule: group=EXAM_OPTIONAL; attempt=3/6] Criteria",
+              "awarded_marks": 7,
+              "review_required": true,
+              "source_pages": [2]
+            }
+          ]
+        }
+      }
+    """.trimIndent()
+
+    val parsedOverAttempt = parseAiEvaluationResponse(overAttemptJson)
+    assertNotNull(parsedOverAttempt)
+    val evalOver = parsedOverAttempt!!.evaluation!!
+    assertEquals(30.0, evalOver.totalMarks!!, 0.001)
+    assertEquals(true, evalOver.reviewRequired)
+    val q1 = evalOver.questions.first { it.questionNumber == "1" }
+    val q3 = evalOver.questions.first { it.questionNumber == "3" }
+    val q4 = evalOver.questions.first { it.questionNumber == "4" }
+    val q6 = evalOver.questions.first { it.questionNumber == "6" }
+    assertEquals("Answer for Q1", q1.studentAnswer)
+    assertEquals(9.0, q1.awardedMarks!!, 0.001)
+    assertEquals("Answer for Q3", q3.studentAnswer)
+    assertEquals(6.0, q3.awardedMarks!!, 0.001)
+    assertEquals("Answer for Q4", q4.studentAnswer)
+    assertEquals(8.0, q4.awardedMarks!!, 0.001)
+    assertEquals("Answer for Q6", q6.studentAnswer)
+    assertEquals(7.0, q6.awardedMarks!!, 0.001)
+  }
+
+  @Test
+  fun testNumericalQuestionOrderingAcrossParserAndViewModel() {
+    val scrambledJson = """
+      {
+        "status": "completed",
+        "percentageAvailable": true,
+        "evaluation": {
+          "id": "eval-order-1",
+          "paperId": "paper-order-1",
+          "studentId": "student-1",
+          "classId": "class-1",
+          "teacherId": "teacher-1",
+          "status": "completed",
+          "totalMarksObtained": 28,
+          "totalMarks": 30,
+          "percentage": 93.33,
+          "percentageAvailable": true,
+          "reviewRequired": false,
+          "questions": [
+            {
+              "id": "q-10",
+              "question_number": "10",
+              "question_text": "Prompt 10",
+              "maximum_marks": 10,
+              "student_answer": "Student answer for Q10",
+              "awarded_marks": 9,
+              "feedback": "Feedback 10"
+            },
+            {
+              "id": "q-2b",
+              "question_number": "2(b)",
+              "question_text": "Prompt 2b",
+              "maximum_marks": 5,
+              "student_answer": "Student answer for Q2(b)",
+              "awarded_marks": 5,
+              "feedback": "Feedback 2b"
+            },
+            {
+              "id": "q-1",
+              "question_number": "1",
+              "question_text": "Prompt 1",
+              "maximum_marks": 5,
+              "student_answer": "Student answer for Q1",
+              "awarded_marks": 5,
+              "feedback": "Feedback 1"
+            },
+            {
+              "id": "q-3",
+              "question_number": "3",
+              "question_text": "Prompt 3",
+              "maximum_marks": 5,
+              "student_answer": "Student answer for Q3",
+              "awarded_marks": 4,
+              "feedback": "Feedback 3"
+            },
+            {
+              "id": "q-2a",
+              "question_number": "2(a)",
+              "question_text": "Prompt 2a",
+              "maximum_marks": 5,
+              "student_answer": "Student answer for Q2(a)",
+              "awarded_marks": 5,
+              "feedback": "Feedback 2a"
+            }
+          ]
+        }
+      }
+    """.trimIndent()
+
+    val parsed = parseAiEvaluationResponse(scrambledJson)
+    assertNotNull(parsed)
+    val ordered = parsed!!.evaluation!!.questions
+    assertEquals(listOf("1", "2(a)", "2(b)", "3", "10"), ordered.map { it.questionNumber })
+    // Verify each question kept its exact student answer, marks, and feedback
+    assertEquals("Student answer for Q1", ordered[0].studentAnswer)
+    assertEquals(5.0, ordered[0].awardedMarks!!, 0.001)
+    assertEquals("Student answer for Q2(a)", ordered[1].studentAnswer)
+    assertEquals(5.0, ordered[1].awardedMarks!!, 0.001)
+    assertEquals("Student answer for Q2(b)", ordered[2].studentAnswer)
+    assertEquals(5.0, ordered[2].awardedMarks!!, 0.001)
+    assertEquals("Student answer for Q3", ordered[3].studentAnswer)
+    assertEquals(4.0, ordered[3].awardedMarks!!, 0.001)
+    assertEquals("Student answer for Q10", ordered[4].studentAnswer)
+    assertEquals(9.0, ordered[4].awardedMarks!!, 0.001)
+
+    // Also verify Roman subparts (i) < (ii) < (iii) < (iv) < (v)
+    assertTrue(compareQuestionNumbers("2(i)", "2(ii)") < 0)
+    assertTrue(compareQuestionNumbers("2(iv)", "2(v)") < 0)
+    assertTrue(compareQuestionNumbers("2", "10") < 0)
+  }
+
+  @Test
+  fun testMarksEditingAndOptionalPaperTotalValidation() {
+    // 6 questions x 10 marks each, attempt any 3, configured paper total = 30
+    val criteriaTag = "[Selection Rule: group=EXAM_OPTIONAL | attempt=3/6 | type=optional] Award up to 10 marks"
+    val initialQuestions = listOf(
+      EvaluationQuestion(
+        id = "q1",
+        questionNumber = "1",
+        questionText = "Question 1",
+        maximumMarks = 10.0,
+        studentAnswer = "Student answer for Q1",
+        markingCriteria = criteriaTag,
+        awardedMarks = 10.0,
+        feedback = "Full marks Q1",
+      ),
+      EvaluationQuestion(
+        id = "q2",
+        questionNumber = "2",
+        questionText = "Question 2",
+        maximumMarks = 10.0,
+        studentAnswer = "[Optional question — not attempted]",
+        markingCriteria = criteriaTag,
+        awardedMarks = 0.0,
+        feedback = "Optional question not attempted",
+      ),
+      EvaluationQuestion(
+        id = "q3",
+        questionNumber = "3",
+        questionText = "Question 3",
+        maximumMarks = 10.0,
+        studentAnswer = "Student answer for Q3",
+        markingCriteria = criteriaTag,
+        awardedMarks = 10.0,
+        feedback = "Full marks Q3",
+      ),
+      EvaluationQuestion(
+        id = "q4",
+        questionNumber = "4",
+        questionText = "Question 4",
+        maximumMarks = 10.0,
+        studentAnswer = "Student answer for Q4",
+        markingCriteria = criteriaTag,
+        awardedMarks = 8.0,
+        feedback = "Good Q4",
+      ),
+      EvaluationQuestion(
+        id = "q5",
+        questionNumber = "5",
+        questionText = "Question 5",
+        maximumMarks = 10.0,
+        studentAnswer = "[No answer detected]",
+        markingCriteria = criteriaTag,
+        awardedMarks = 0.0,
+        feedback = "No answer",
+      ),
+      EvaluationQuestion(
+        id = "q6",
+        questionNumber = "6",
+        questionText = "Question 6",
+        maximumMarks = 10.0,
+        studentAnswer = "Extra student answer for Q6",
+        markingCriteria = criteriaTag,
+        awardedMarks = 0.0,
+        feedback = "Extra attempt",
+      ),
+    )
+
+    val viewModel = StudentDetailViewModel(
+      studentRepository = FakeStudentRepository(),
+      classRepository = FakeClassRepository(),
+      paperRepository = FakePaperRepository(),
+      ocrRepository = FakeOcrRepository(),
+    )
+
+    val evalResponse = AiEvaluationResponse(
+      status = "needs_review",
+      percentageAvailable = true,
+      evaluation = EvaluationDetail(
+        id = "eval-opt-30",
+        paperId = "paper-opt-30",
+        studentId = "s-1",
+        classId = "c-1",
+        teacherId = "t-1",
+        status = "needs_review",
+        totalMarksObtained = 28.0,
+        totalMarks = 30.0,
+        extractedQuestionTotalMarks = 30.0,
+        percentage = 93.33,
+        percentageAvailable = true,
+        reviewRequired = false,
+        questions = initialQuestions,
+      ),
+    )
+
+    viewModel.setEvaluationResultForTesting("paper-opt-30", evalResponse)
+
+    // 1. Valid edit within [0, maximum_marks] and within paper total (30): change Q4 from 8.0 to 10.0 -> total = 30.0
+    viewModel.onUpdateQuestion("q4", "4", 10.0, "Updated Q4")
+    val afterValidEdit = viewModel.uiState.value
+    assertNull(afterValidEdit.saveCorrectionsError)
+    val q4Updated = afterValidEdit.editedQuestions!!.first { it.questionNumber == "4" }
+    assertEquals(10.0, q4Updated.awardedMarks!!, 0.001)
+    assertEquals(
+      30.0,
+      calculateCountedEvaluationTotalMarks(afterValidEdit.editedQuestions!!, 30.0),
+      0.001
+    )
+
+    // 2. Reject mark exceeding question's maximum_marks (e.g. 12 on a 10-mark question) without overwriting Q4
+    viewModel.onUpdateQuestion("q4", "4", 12.0, "Updated Q4")
+    val afterExceedMax = viewModel.uiState.value
+    assertNotNull(afterExceedMax.saveCorrectionsError)
+    assertTrue(afterExceedMax.saveCorrectionsError!!.contains("cannot exceed its maximum of 10"))
+    assertEquals(
+      10.0,
+      afterExceedMax.editedQuestions!!.first { it.questionNumber == "4" }.awardedMarks!!,
+      0.001
+    )
+
+    // 3. Reject negative mark
+    viewModel.onUpdateQuestion("q4", "4", -2.0, "Updated Q4")
+    val afterNegative = viewModel.uiState.value
+    assertNotNull(afterNegative.saveCorrectionsError)
+    assertTrue(afterNegative.saveCorrectionsError!!.contains("cannot be negative"))
+    assertEquals(
+      10.0,
+      afterNegative.editedQuestions!!.first { it.questionNumber == "4" }.awardedMarks!!,
+      0.001
+    )
+
+    // 4. Reject awarding marks to unattempted question ("[Optional question — not attempted]" or "[No answer detected]")
+    viewModel.onUpdateQuestion("q2", "2", 5.0, "Optional question not attempted")
+    val afterUnattempted = viewModel.uiState.value
+    assertNotNull(afterUnattempted.saveCorrectionsError)
+    assertTrue(afterUnattempted.saveCorrectionsError!!.contains("no student answer was detected"))
+    assertEquals(
+      0.0,
+      afterUnattempted.editedQuestions!!.first { it.questionNumber == "2" }.awardedMarks!!,
+      0.001
+    )
+
+    // 5. Reject awarding marks to a 4th question (Q6) when 3 of 6 are already counted and paper total is 30
+    viewModel.onUpdateQuestion("q6", "6", 5.0, "Extra attempt")
+    val afterFourthAttempt = viewModel.uiState.value
+    assertNotNull(afterFourthAttempt.saveCorrectionsError)
+    assertEquals(
+      0.0,
+      afterFourthAttempt.editedQuestions!!.first { it.questionNumber == "6" }.awardedMarks!!,
+      0.001
+    )
+    assertEquals(
+      30.0,
+      calculateCountedEvaluationTotalMarks(afterFourthAttempt.editedQuestions!!, 30.0),
+      0.001
+    )
+
+    // 6. Save validation also blocks saving if questions list has raw total > paper total (e.g. 40 > 30)
+    val invalidSaveList = initialQuestions.map {
+      if (it.questionNumber in listOf("1", "3", "4", "6")) it.copy(awardedMarks = 10.0) else it
+    }
+    val saveError = validatePaperEvaluationForSave(invalidSaveList, 30.0)
+    assertNotNull(saveError)
+  }
+
+  @Test
+  fun testOptionalGroupScoringAndApproveEvaluationValidationAndUnsavedEditsBlocking() = runTest {
+    val criteriaTag = "[Selection Rule: group=EXAM_OPTIONAL | attempt=3/6 | type=optional] Award up to 10 marks"
+
+    fun buildOptionalQuestion(num: Int, answer: String, awarded: Double): EvaluationQuestion {
+      return EvaluationQuestion(
+        id = "q-$num",
+        questionNumber = "$num",
+        questionText = "Question $num",
+        maximumMarks = 10.0,
+        studentAnswer = answer,
+        markingCriteria = criteriaTag,
+        awardedMarks = awarded,
+        feedback = "Feedback Q$num",
+      )
+    }
+
+    // 1. Optional-group scoring: 4 scores of 5 in an attempt-3-of-6 group count as 15, not 20
+    val fourFivesQuestions = listOf(
+      buildOptionalQuestion(1, "Answer 1", 5.0),
+      buildOptionalQuestion(2, "Answer 2", 5.0),
+      buildOptionalQuestion(3, "[Optional question — not attempted]", 0.0),
+      buildOptionalQuestion(4, "Answer 4", 5.0),
+      buildOptionalQuestion(5, "[Optional question — not attempted]", 0.0),
+      buildOptionalQuestion(6, "Answer 6", 5.0),
+    )
+    assertEquals(
+      15.0,
+      calculateCountedEvaluationTotalMarks(fourFivesQuestions, 30.0),
+      0.001,
+    )
+
+    // 2. Different scores: 8, 6, 7, 5 across 4 attempted questions count as 21 (8 + 7 + 6)
+    val mixedFourQuestions = listOf(
+      buildOptionalQuestion(1, "Answer 1", 8.0),
+      buildOptionalQuestion(2, "Answer 2", 6.0),
+      buildOptionalQuestion(3, "[Optional question — not attempted]", 0.0),
+      buildOptionalQuestion(4, "Answer 4", 7.0),
+      buildOptionalQuestion(5, "[Optional question — not attempted]", 0.0),
+      buildOptionalQuestion(6, "Answer 6", 5.0),
+    )
+    assertEquals(
+      21.0,
+      calculateCountedEvaluationTotalMarks(mixedFourQuestions, 30.0),
+      0.001,
+    )
+
+    val student = Student(
+      id = "s-1",
+      classId = "c-1",
+      teacherId = "t-1",
+      name = "Zaid Ali",
+      fatherName = "Ali",
+      rollNumber = "01",
+    )
+    val classRoom = ClassRoom(
+      id = "c-1",
+      examId = "e-1",
+      teacherId = "t-1",
+      session = "2022-2026",
+      semester = "4th",
+      timing = "Morning",
+      subjectName = "Physics",
+      totalMarks = 30,
+    )
+    val paper = StudentPaper(
+      id = "paper-opt-30",
+      studentId = "s-1",
+      classId = "c-1",
+      teacherId = "t-1",
+      totalPages = 1,
+      status = "needs_review",
+      evaluation = EvaluationStatus(status = "needs_review"),
+    )
+
+    val rpcCalls = mutableListOf<Pair<String, String>>()
+    val viewModel = StudentDetailViewModel(
+      studentRepository = FakeStudentRepository(listOf(student)),
+      classRepository = FakeClassRepository(listOf(classRoom)),
+      paperRepository = FakePaperRepository(listOf(paper)),
+      ocrRepository = FakeOcrRepository(),
+      approveEvaluationAction = { evalId, pId ->
+        rpcCalls.add(evalId to pId)
+        Result.success(Unit)
+      },
+    )
+    viewModel.loadStudentAndPapers("s-1")
+
+    val validQuestions = listOf(
+      buildOptionalQuestion(1, "Answer 1", 8.0),
+      buildOptionalQuestion(2, "Answer 2", 6.0),
+      buildOptionalQuestion(3, "[Optional question — not attempted]", 0.0),
+      buildOptionalQuestion(4, "Answer 4", 7.0),
+      buildOptionalQuestion(5, "[Optional question — not attempted]", 0.0),
+      buildOptionalQuestion(6, "Answer 6 (extra attempt zeroed)", 0.0),
+    )
+
+    fun makeEvalResponse(
+      questions: List<EvaluationQuestion>,
+      totalObtained: Double = 21.0,
+    ): AiEvaluationResponse {
+      return AiEvaluationResponse(
+        status = "needs_review",
+        percentageAvailable = true,
+        evaluation = EvaluationDetail(
+          id = "eval-opt-30",
+          paperId = "paper-opt-30",
+          studentId = "s-1",
+          classId = "c-1",
+          teacherId = "t-1",
+          status = "needs_review",
+          totalMarksObtained = totalObtained,
+          totalMarks = 30.0,
+          extractedQuestionTotalMarks = 30.0,
+          percentage = 70.0,
+          percentageAvailable = true,
+          reviewRequired = true,
+          questions = questions,
+        ),
+      )
+    }
+
+    // 3. The actual ViewModel approval path blocks approval when teacher edits are unsaved
+    viewModel.setEvaluationResultForTesting("paper-opt-30", makeEvalResponse(validQuestions))
+    viewModel.onUpdateQuestion("q-1", "1", 9.0, "Updated Q1 feedback")
+    assertNotNull(viewModel.uiState.value.editedQuestions)
+    assertNull(viewModel.uiState.value.saveCorrectionsError)
+
+    viewModel.approveEvaluation("eval-opt-30", "paper-opt-30")
+    assertTrue(rpcCalls.isEmpty())
+    assertFalse(viewModel.uiState.value.approvalSuccess)
+    assertFalse(viewModel.uiState.value.isApproving)
+    assertEquals(
+      "Please save your edited marks and feedback before approving the result.",
+      viewModel.uiState.value.approvalError,
+    )
+    assertEquals("needs_review", viewModel.uiState.value.evaluationResult?.status)
+
+    // 4. Approval is blocked when marks violate the existing validation rules
+    // 4a. Unresolved optional-group over-attempt (4 questions have positive marks > 0 in a 3-of-6 group)
+    viewModel.setEvaluationResultForTesting("paper-opt-30", makeEvalResponse(fourFivesQuestions, totalObtained = 15.0))
+    assertNull(viewModel.uiState.value.editedQuestions)
+    viewModel.approveEvaluation("eval-opt-30", "paper-opt-30")
+    assertTrue(rpcCalls.isEmpty())
+    assertFalse(viewModel.uiState.value.approvalSuccess)
+    assertNotNull(viewModel.uiState.value.approvalError)
+    assertTrue(viewModel.uiState.value.approvalError!!.contains("Only 3 of 6 questions may receive marks"))
+
+    // 4b. Question mark exceeding maximum_marks (12 > 10)
+    val overMaxQuestions = validQuestions.map {
+      if (it.questionNumber == "1") it.copy(awardedMarks = 12.0) else it
+    }
+    viewModel.setEvaluationResultForTesting("paper-opt-30", makeEvalResponse(overMaxQuestions, totalObtained = 25.0))
+    viewModel.approveEvaluation("eval-opt-30", "paper-opt-30")
+    assertTrue(rpcCalls.isEmpty())
+    assertFalse(viewModel.uiState.value.approvalSuccess)
+    assertNotNull(viewModel.uiState.value.approvalError)
+    assertTrue(viewModel.uiState.value.approvalError!!.contains("cannot exceed its maximum of 10"))
+
+    // 4c. Teacher attempted an invalid edit when no prior valid edits exist:
+    // editedQuestions must remain null, actual awardedMarks must remain 8.0, saveCorrectionsError must be set, and approveEvaluation is blocked
+    viewModel.setEvaluationResultForTesting("paper-opt-30", makeEvalResponse(validQuestions, totalObtained = 21.0))
+    viewModel.onUpdateQuestion("q-1", "1", 15.0, "Invalid mark edit")
+    assertNull(viewModel.uiState.value.editedQuestions)
+    assertEquals(
+      8.0,
+      viewModel.uiState.value.evaluationResult?.evaluation?.questions?.first { it.questionNumber == "1" }?.awardedMarks!!,
+      0.001,
+    )
+    assertNotNull(viewModel.uiState.value.saveCorrectionsError)
+    viewModel.approveEvaluation("eval-opt-30", "paper-opt-30")
+    assertTrue(rpcCalls.isEmpty())
+    assertFalse(viewModel.uiState.value.approvalSuccess)
+    assertNotNull(viewModel.uiState.value.approvalError)
+    assertTrue(viewModel.uiState.value.approvalError!!.contains("cannot exceed its maximum of 10"))
+
+    // 4d. When an earlier valid pending edit exists, a subsequent rejected edit preserves the earlier valid edit
+    viewModel.clearSaveCorrectionsError()
+    viewModel.clearApprovalError()
+    viewModel.onUpdateQuestion("q-1", "1", 9.0, "Valid Q1 edit")
+    assertNotNull(viewModel.uiState.value.editedQuestions)
+    viewModel.onUpdateQuestion("q-1", "1", 15.0, "Rejected Q1 edit")
+    assertNotNull(viewModel.uiState.value.editedQuestions)
+    val preservedQ1 = viewModel.uiState.value.editedQuestions!!.first { it.questionNumber == "1" }
+    assertEquals(9.0, preservedQ1.awardedMarks!!, 0.001)
+    assertEquals("Valid Q1 edit", preservedQ1.feedback)
+    assertNotNull(viewModel.uiState.value.saveCorrectionsError)
+
+    // 5. Normal valid approval still follows the existing workflow (and after clearing a rejected-only edit with no valid pending edits, editedQuestions is null so approval proceeds)
+    viewModel.setEvaluationResultForTesting("paper-opt-30", makeEvalResponse(validQuestions, totalObtained = 21.0))
+    viewModel.onUpdateQuestion("q-1", "1", 15.0, "Rejected only edit")
+    assertNull(viewModel.uiState.value.editedQuestions)
+    viewModel.clearSaveCorrectionsError()
+    assertNull(viewModel.uiState.value.editedQuestions)
+    assertNull(viewModel.uiState.value.saveCorrectionsError)
+    viewModel.approveEvaluation("eval-opt-30", "paper-opt-30")
+
+    assertEquals(listOf("eval-opt-30" to "paper-opt-30"), rpcCalls)
+    assertTrue(viewModel.uiState.value.approvalSuccess)
+    assertFalse(viewModel.uiState.value.isApproving)
+    assertNull(viewModel.uiState.value.approvalError)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.status)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals(false, viewModel.uiState.value.evaluationResult?.evaluation?.reviewRequired)
+    assertEquals("Result approved and saved successfully.", viewModel.uiState.value.feedbackMessage)
+
+    // Approved result remains read-only and blocks duplicate approval RPC calls
+    viewModel.onUpdateQuestion("q-1", "1", 2.0, "Attempted edit after approval")
+    assertNull(viewModel.uiState.value.editedQuestions)
+    viewModel.approveEvaluation("eval-opt-30", "paper-opt-30")
+    assertEquals(1, rpcCalls.size)
+    assertEquals("This result has already been approved.", viewModel.uiState.value.feedbackMessage)
+  }
+}

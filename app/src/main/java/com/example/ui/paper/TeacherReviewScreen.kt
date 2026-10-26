@@ -88,6 +88,11 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.AiEvaluationResponse
 import com.example.data.model.EvaluationQuestion
+import com.example.data.model.calculateCountedEvaluationTotalMarks
+import com.example.data.model.calculateEffectiveEvaluationQuestionTotalMarks
+import com.example.data.model.isQuestionUnattemptedForScoring
+import com.example.data.model.sortEvaluationQuestionsNumerically
+import com.example.data.model.stripSelectionRuleTagFromCriteria
 import com.example.ui.components.ExamCardSkeleton
 import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.BorderGray
@@ -155,11 +160,17 @@ fun TeacherReviewScreen(
     }
   }
 
-  // Show feedback in snackbar if available
+  // Show feedback or mark validation error in snackbar if available
   LaunchedEffect(uiState.feedbackMessage) {
     uiState.feedbackMessage?.let { msg ->
       snackbarHostState.showSnackbar(msg)
       viewModel.dismissFeedbackMessage()
+    }
+  }
+
+  LaunchedEffect(uiState.saveCorrectionsError) {
+    uiState.saveCorrectionsError?.let { errMsg ->
+      snackbarHostState.showSnackbar(errMsg)
     }
   }
 
@@ -170,10 +181,13 @@ fun TeacherReviewScreen(
     evalResponse?.status.equals("approved", ignoreCase = true) ||
     knownPaper?.status.equals("approved", ignoreCase = true) ||
     knownPaper?.evaluation?.status.equals("approved", ignoreCase = true)
-  val questions = if (isApproved) {
+  val rawQuestions = if (isApproved) {
     evaluation?.questions.orEmpty()
   } else {
     uiState.editedQuestions ?: evaluation?.questions.orEmpty()
+  }
+  val questions = remember(rawQuestions) {
+    sortEvaluationQuestionsNumerically(rawQuestions)
   }
   val isReviewRequired = !isApproved && (
     evaluation?.reviewRequired == true ||
@@ -194,14 +208,14 @@ fun TeacherReviewScreen(
     handleBack()
   }
 
-  val liveTotalObtained = if (!isApproved && uiState.editedQuestions != null) {
-    uiState.editedQuestions?.sumOf { it.awardedMarks ?: 0.0 } ?: 0.0
-  } else {
-    evaluation?.totalMarksObtained ?: questions.sumOf { it.awardedMarks ?: 0.0 }
-  }
   val totalPossible = uiState.classRoom?.totalMarks?.toDouble()
     ?: evaluation?.totalMarks
-    ?: questions.sumOf { it.maximumMarks ?: 0.0 }
+    ?: calculateEffectiveEvaluationQuestionTotalMarks(questions)
+  val liveTotalObtained = if (!isApproved && uiState.editedQuestions != null) {
+    calculateCountedEvaluationTotalMarks(questions, totalPossible)
+  } else {
+    evaluation?.totalMarksObtained ?: calculateCountedEvaluationTotalMarks(questions, totalPossible)
+  }
 
   val topHeaderBlendGradient = remember {
     Brush.verticalGradient(
@@ -890,7 +904,7 @@ fun TeacherReviewScreen(
                   }
 
                   // Percentage Circle Pill
-                  val pctStr = if (totalPossible > 0.0) {
+                  val pctStr = if (evaluation?.percentageAvailable == true && totalPossible > 0.0) {
                     String.format(Locale.US, "%.1f%%", (liveTotalObtained / totalPossible) * 100.0)
                   } else "N/A"
 
@@ -1190,9 +1204,9 @@ private fun FullQuestionCard(
   val maxMarks = question.maximumMarks ?: 0.0
   val awarded = question.awardedMarks ?: 0.0
 
-  // Check if student answer is genuinely missing
+  // Check if student answer is genuinely missing / unattempted
   val rawAnswer = question.studentAnswer?.trim().orEmpty()
-  val isAnswerMissing = rawAnswer.isBlank() || rawAnswer.equals("No answer text extracted.", ignoreCase = true)
+  val isAnswerMissing = isQuestionUnattemptedForScoring(question)
 
   var showRubric by remember(question.id, qLabel) { mutableStateOf(false) }
 
@@ -1301,11 +1315,34 @@ private fun FullQuestionCard(
               )
             }
           } else {
+            val canIncrease = isEditable && !isAnswerMissing && awarded < maxMarks
             Row(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(2.dp),
               modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
             ) {
+              if (isEditable && awarded > 0.0) {
+                Surface(
+                  shape = RoundedCornerShape(5.dp),
+                  color = Color.White,
+                  border = BorderStroke(1.dp, boxContentColor.copy(alpha = 0.35f)),
+                  modifier = Modifier
+                    .padding(end = 2.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .clickable(role = Role.Button) { onUpdateMarks(0.0) }
+                    .testTag("question_marks_zero_$qLabel"),
+                ) {
+                  Text(
+                    text = "Set 0",
+                    fontFamily = FigtreeFontFamily,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = boxContentColor,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
+                  )
+                }
+              }
+
               // Decrement Button (-)
               IconButton(
                 onClick = {
@@ -1349,13 +1386,13 @@ private fun FullQuestionCard(
               // Increment Button (+)
               IconButton(
                 onClick = {
-                  if (isEditable) {
+                  if (canIncrease) {
                     val step = if (maxMarks <= 10.0) 0.5 else 1.0
                     val newMarks = (awarded + step).coerceIn(0.0, maxMarks)
                     onUpdateMarks(newMarks)
                   }
                 },
-                enabled = isEditable && awarded < maxMarks,
+                enabled = canIncrease,
                 modifier = Modifier
                   .size(28.dp)
                   .testTag("question_marks_increment_$qLabel"),
@@ -1363,7 +1400,7 @@ private fun FullQuestionCard(
                 Icon(
                   imageVector = Icons.Default.Add,
                   contentDescription = "Increase Marks",
-                  tint = if (isEditable && awarded < maxMarks) boxContentColor else BorderGray,
+                  tint = if (canIncrease) boxContentColor else BorderGray,
                   modifier = Modifier.size(14.dp),
                 )
               }
@@ -1556,7 +1593,7 @@ private fun FullQuestionCard(
  */
 private fun cleanProvisionalText(text: String?): String {
   if (text.isNullOrBlank()) return ""
-  return text
+  return stripSelectionRuleTagFromCriteria(text)
     .replace(Regex("\\[Provisional Reference Answer\\]:\\s*", RegexOption.IGNORE_CASE), "")
     .replace(Regex("\\[Provisional Criteria\\]:\\s*", RegexOption.IGNORE_CASE), "")
     .replace(Regex("\\[provisional reference answer\\]", RegexOption.IGNORE_CASE), "")

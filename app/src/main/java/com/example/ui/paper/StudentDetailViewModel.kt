@@ -13,8 +13,15 @@ import com.example.data.model.AiEvaluationResponse
 import com.example.data.model.ClassRoom
 import com.example.data.model.Student
 import com.example.data.model.StudentPaper
+import com.example.data.model.MarkEditValidationResult
+import com.example.data.model.calculateCountedEvaluationTotalMarks
+import com.example.data.model.calculateEffectiveEvaluationQuestionTotalMarks
+import com.example.data.model.calculateEffectiveQuestionTotalMarks
 import com.example.data.model.evaluationJsonParser
 import com.example.data.model.parseAiEvaluationResponse
+import com.example.data.model.sortEvaluationQuestionsNumerically
+import com.example.data.model.validatePaperEvaluationForSave
+import com.example.data.model.validateQuestionMarkEdit
 import com.example.data.remote.SupabaseClientProvider
 import com.example.data.repository.ClassRepository
 import com.example.data.repository.OcrRepository
@@ -71,6 +78,7 @@ class StudentDetailViewModel(
   private val classRepository: ClassRepository,
   private val paperRepository: PaperRepository,
   private val ocrRepository: OcrRepository? = null,
+  private val approveEvaluationAction: (suspend (evaluationId: String, paperId: String) -> Result<Unit>)? = null,
 ) : ViewModel() {
 
   private val evaluationHttpClient = OkHttpClient.Builder()
@@ -367,29 +375,31 @@ class StudentDetailViewModel(
           status = evalRecord.status,
           totalMarksObtained = evalRecord.totalMarksObtained,
           totalMarks = evalRecord.totalMarks,
-          extractedQuestionTotalMarks = questionRecords.sumOf { it.maximumMarks },
+          extractedQuestionTotalMarks = calculateEffectiveQuestionTotalMarks(questionRecords),
           percentage = evalRecord.percentage,
           percentageAvailable = evalRecord.percentage != null,
           reviewRequired = evalRecord.reviewRequired,
           reviewReason = evalRecord.reviewReason,
           createdAt = evalRecord.createdAt,
           updatedAt = evalRecord.updatedAt,
-          questions = questionRecords.map { q ->
-            EvaluationQuestion(
-              id = q.id,
-              evaluationId = q.evaluationId,
-              questionNumber = q.questionNumber,
-              questionText = q.questionText,
-              maximumMarks = q.maximumMarks,
-              studentAnswer = q.studentAnswer,
-              expectedAnswer = q.expectedAnswer,
-              markingCriteria = q.markingCriteria,
-              awardedMarks = q.awardedMarks,
-              feedback = q.feedback,
-              reviewRequired = q.reviewRequired,
-              reviewReason = q.reviewReason,
-            )
-          }
+          questions = sortEvaluationQuestionsNumerically(
+            questionRecords.map { q ->
+              EvaluationQuestion(
+                id = q.id,
+                evaluationId = q.evaluationId,
+                questionNumber = q.questionNumber,
+                questionText = q.questionText,
+                maximumMarks = q.maximumMarks,
+                studentAnswer = q.studentAnswer,
+                expectedAnswer = q.expectedAnswer,
+                markingCriteria = q.markingCriteria,
+                awardedMarks = q.awardedMarks,
+                feedback = q.feedback,
+                reviewRequired = q.reviewRequired,
+                reviewReason = q.reviewReason,
+              )
+            }
+          )
         )
 
         AiEvaluationResponse(
@@ -408,11 +418,24 @@ class StudentDetailViewModel(
   }
 
   internal fun setEvaluationResultForTesting(paperId: String, response: AiEvaluationResponse?) {
+    val sortedResponse = response?.let { resp ->
+      val eval = resp.evaluation
+      if (eval != null) {
+        resp.copy(
+          evaluation = eval.copy(
+            questions = sortEvaluationQuestionsNumerically(eval.questions)
+          )
+        )
+      } else {
+        resp
+      }
+    }
     _uiState.update {
       it.copy(
         evaluatedPaperId = paperId,
-        evaluationResult = response,
+        evaluationResult = sortedResponse,
         editedQuestions = null,
+        saveCorrectionsError = null,
       )
     }
   }
@@ -674,15 +697,75 @@ class StudentDetailViewModel(
     }
   }
 
+
   fun approveEvaluation(evaluationId: String, paperId: String) {
     if (evaluationId.isBlank() || paperId.isBlank()) return
 
-    val currentEval = _uiState.value.evaluationResult?.evaluation
+    val state = _uiState.value
+    val currentEval = state.evaluationResult?.evaluation
     val isAlreadyApprovedState = currentEval?.status.equals("approved", ignoreCase = true) ||
-      _uiState.value.evaluationResult?.status.equals("approved", ignoreCase = true)
+      state.evaluationResult?.status.equals("approved", ignoreCase = true)
     if (isAlreadyApprovedState) {
       _uiState.update {
         it.copy(feedbackMessage = "This result has already been approved.")
+      }
+      return
+    }
+
+    if (state.isSavingCorrections) {
+      _uiState.update {
+        it.copy(
+          isApproving = false,
+          approvalSuccess = false,
+          approvalError = "Please wait for edited marks and feedback to finish saving before approving.",
+        )
+      }
+      return
+    }
+
+    val rawQuestions = state.editedQuestions ?: currentEval?.questions.orEmpty()
+    val questions = sortEvaluationQuestionsNumerically(rawQuestions)
+    val totalPossibleMarks = state.classRoom?.totalMarks?.toDouble()
+      ?: currentEval?.totalMarks
+      ?: calculateEffectiveEvaluationQuestionTotalMarks(questions)
+
+    val evalTotalObtained = currentEval?.totalMarksObtained
+    val summaryTotalError = if (
+      evalTotalObtained != null &&
+      (evalTotalObtained.isNaN() || evalTotalObtained.isInfinite() || evalTotalObtained < 0.0)
+    ) {
+      "Total marks obtained cannot be negative or invalid."
+    } else if (
+      evalTotalObtained != null &&
+      totalPossibleMarks > 0.0 &&
+      evalTotalObtained > totalPossibleMarks + 1e-6
+    ) {
+      "Total marks (${evalTotalObtained}) cannot exceed the configured paper total of ${totalPossibleMarks}."
+    } else {
+      null
+    }
+
+    val validationError = state.saveCorrectionsError
+      ?: validatePaperEvaluationForSave(questions, totalPossibleMarks)
+      ?: summaryTotalError
+    if (validationError != null) {
+      _uiState.update {
+        it.copy(
+          isApproving = false,
+          approvalSuccess = false,
+          approvalError = validationError,
+        )
+      }
+      return
+    }
+
+    if (state.editedQuestions != null) {
+      _uiState.update {
+        it.copy(
+          isApproving = false,
+          approvalSuccess = false,
+          approvalError = "Please save your edited marks and feedback before approving the result.",
+        )
       }
       return
     }
@@ -695,53 +778,53 @@ class StudentDetailViewModel(
         )
       }
 
-      val result = withContext(Dispatchers.IO) {
+      val result = if (approveEvaluationAction != null) {
         try {
-          if (!SupabaseClientProvider.isConfigured()) {
-            return@withContext Result.failure<Unit>(
-              IllegalStateException("Supabase is not configured yet.")
-            )
-          }
-
-          val session = SupabaseClientProvider.client.auth.currentSessionOrNull()
-          val accessToken = session?.accessToken
-          if (accessToken.isNullOrBlank()) {
-            return@withContext Result.failure<Unit>(
-              IllegalStateException("Teacher is not authenticated. Please log in again.")
-            )
-          }
-
-          val params = buildJsonObject {
-            put("p_evaluation_id", evaluationId)
-            put("p_paper_id", paperId)
-          }
-
-          SupabaseClientProvider.client.postgrest.rpc(
-            function = "approve_paper_evaluation",
-            parameters = params,
-          )
-
-          Result.success(Unit)
+          approveEvaluationAction.invoke(evaluationId, paperId)
         } catch (e: Exception) {
-          Log.e("StudentDetailViewModel", "Error approving evaluation", e)
           Result.failure(e)
+        }
+      } else {
+        withContext(Dispatchers.IO) {
+          try {
+            if (!SupabaseClientProvider.isConfigured()) {
+              return@withContext Result.failure<Unit>(
+                IllegalStateException("Supabase is not configured yet.")
+              )
+            }
+
+            val session = SupabaseClientProvider.client.auth.currentSessionOrNull()
+            val accessToken = session?.accessToken
+            if (accessToken.isNullOrBlank()) {
+              return@withContext Result.failure<Unit>(
+                IllegalStateException("Teacher is not authenticated. Please log in again.")
+              )
+            }
+
+            val params = buildJsonObject {
+              put("p_evaluation_id", evaluationId)
+              put("p_paper_id", paperId)
+            }
+
+            SupabaseClientProvider.client.postgrest.rpc(
+              function = "approve_paper_evaluation",
+              parameters = params,
+            )
+
+            Result.success(Unit)
+          } catch (e: Exception) {
+            Log.e("StudentDetailViewModel", "Error approving evaluation", e)
+            Result.failure(e)
+          }
         }
       }
 
       result.fold(
         onSuccess = {
           _uiState.update { state ->
-            val finalizedQuestions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions.orEmpty()
-            val finalizedTotal = if (state.editedQuestions != null) {
-              finalizedQuestions.sumOf { it.awardedMarks ?: 0.0 }
-            } else {
-              state.evaluationResult?.evaluation?.totalMarksObtained
-            }
             val updatedDetail = state.evaluationResult?.evaluation?.copy(
               status = "approved",
               reviewRequired = false,
-              questions = finalizedQuestions,
-              totalMarksObtained = finalizedTotal,
             )
             val updatedResponse = state.evaluationResult?.copy(
               status = "approved",
@@ -859,29 +942,71 @@ class StudentDetailViewModel(
         state.evaluationResult?.evaluation?.status.equals("approved", ignoreCase = true)
       if (isApproved) return@update state
 
-      val currentQuestions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions ?: return@update state
-      val updatedQuestions = currentQuestions.map { q ->
-        val isTarget = if (q.id != null && questionId != null) {
+      val baseQuestions = state.editedQuestions
+        ?: state.evaluationResult?.evaluation?.questions
+        ?: return@update state
+      val currentQuestions = sortEvaluationQuestionsNumerically(baseQuestions)
+
+      val targetIndex = currentQuestions.indexOfFirst { q ->
+        if (q.id != null && questionId != null) {
           q.id == questionId
         } else {
-          // Fallback for unsaved questions if ID is null: match by question number
           q.questionNumber != null && q.questionNumber == questionNumber
         }
+      }
+      if (targetIndex == -1) return@update state
 
-        if (isTarget) {
-          val maxMarks = q.maximumMarks ?: 0.0
-          val coercedMarks = if (awardedMarks != null && maxMarks > 0.0) {
-            awardedMarks.coerceIn(0.0, maxMarks)
-          } else {
-            awardedMarks?.coerceAtLeast(0.0)
-          }
-          q.copy(awardedMarks = coercedMarks, feedback = feedback)
-        } else {
-          q
+      val targetQuestion = currentQuestions[targetIndex]
+      val marksUnchanged = targetQuestion.awardedMarks == awardedMarks
+      if (marksUnchanged) {
+        if (targetQuestion.feedback != feedback) {
+          val updated = currentQuestions.toMutableList()
+          updated[targetIndex] = targetQuestion.copy(feedback = feedback)
+          return@update state.copy(
+            editedQuestions = updated,
+            saveCorrectionsSuccess = false,
+            saveCorrectionsError = null,
+          )
+        }
+        return@update state.copy(
+          saveCorrectionsError = null,
+        )
+      }
+
+      val totalPossibleMarks = state.classRoom?.totalMarks?.toDouble()
+        ?: state.evaluationResult?.evaluation?.totalMarks
+        ?: calculateEffectiveEvaluationQuestionTotalMarks(currentQuestions).takeIf { it > 0.0 }
+
+      when (
+        val validation = validateQuestionMarkEdit(
+          questions = currentQuestions,
+          index = targetIndex,
+          newAwardedMarks = awardedMarks,
+          totalPossibleMarks = totalPossibleMarks,
+        )
+      ) {
+        is MarkEditValidationResult.Invalid -> {
+          state.copy(
+            editedQuestions = state.editedQuestions?.let { sortEvaluationQuestionsNumerically(it) },
+            saveCorrectionsSuccess = false,
+            saveCorrectionsError = validation.message,
+          )
+        }
+        is MarkEditValidationResult.Valid -> {
+          val updated = validation.updatedQuestions.toMutableList()
+          updated[targetIndex] = updated[targetIndex].copy(feedback = feedback)
+          state.copy(
+            editedQuestions = updated,
+            saveCorrectionsSuccess = false,
+            saveCorrectionsError = null,
+          )
         }
       }
-      state.copy(editedQuestions = updatedQuestions, saveCorrectionsSuccess = false)
     }
+  }
+
+  fun clearSaveCorrectionsError() {
+    _uiState.update { it.copy(saveCorrectionsError = null) }
   }
 
   fun saveTeacherCorrections(evaluationId: String, paperId: String) {
@@ -890,9 +1015,26 @@ class StudentDetailViewModel(
       state.evaluationResult?.evaluation?.status.equals("approved", ignoreCase = true)
     if (isApproved) return
 
-    val questions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions ?: return
-    val studentId = state.student?.id ?: return
-    val classId = state.classRoom?.id ?: return
+    val rawQuestions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions ?: return
+    val questions = sortEvaluationQuestionsNumerically(rawQuestions)
+    val totalPossibleMarks = state.classRoom?.totalMarks?.toDouble()
+      ?: state.evaluationResult?.evaluation?.totalMarks
+      ?: calculateEffectiveEvaluationQuestionTotalMarks(questions)
+
+    val validationError = validatePaperEvaluationForSave(questions, totalPossibleMarks)
+    if (validationError != null) {
+      _uiState.update {
+        it.copy(
+          isSavingCorrections = false,
+          saveCorrectionsSuccess = false,
+          saveCorrectionsError = validationError,
+        )
+      }
+      return
+    }
+
+    val studentId = state.student?.id ?: state.evaluationResult?.evaluation?.studentId ?: return
+    val classId = state.classRoom?.id ?: state.evaluationResult?.evaluation?.classId ?: return
     val teacherId = state.evaluationResult?.evaluation?.teacherId ?: return
 
     viewModelScope.launch {
@@ -906,11 +1048,12 @@ class StudentDetailViewModel(
             )
           }
 
-          // Calculate totals
-          val totalMarksObtained = questions.sumOf { it.awardedMarks ?: 0.0 }
-          val totalPossibleMarks = state.classRoom?.totalMarks?.toDouble() ?: questions.sumOf { it.maximumMarks ?: 0.0 }
-          val percentage = if (totalPossibleMarks > 0.0) {
-            Math.round((totalMarksObtained / totalPossibleMarks) * 10000) / 100.0
+          val totalMarksObtained = calculateCountedEvaluationTotalMarks(questions, totalPossibleMarks)
+          val effectiveExtractedTotal = calculateEffectiveEvaluationQuestionTotalMarks(questions)
+          val marksMatchTotal = effectiveExtractedTotal <= 0.0 ||
+            kotlin.math.abs(effectiveExtractedTotal - totalPossibleMarks) <= 0.01
+          val percentage = if (totalPossibleMarks > 0.0 && marksMatchTotal) {
+            (Math.round((totalMarksObtained / totalPossibleMarks) * 10000) / 100.0).coerceIn(0.0, 100.0)
           } else null
 
           val questionsJson = questions.map { q ->
@@ -965,6 +1108,7 @@ class StudentDetailViewModel(
             it.copy(
               isSavingCorrections = false,
               saveCorrectionsSuccess = true,
+              approvalError = null,
               evaluationResult = updatedResponse,
               editedQuestions = null,
               feedbackMessage = "Corrections saved successfully.",
