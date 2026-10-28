@@ -88,3 +88,4 @@ data class LocalScannedPage(
   val uri: Uri,
   val pageNumber: Int,
 )
+

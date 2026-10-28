@@ -7,12 +7,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.LocalScannedPage
 import com.example.data.repository.PaperRepository
 import com.example.data.repository.StudentRepository
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 data class ScanPaperUiState(
   val pages: List<LocalScannedPage> = emptyList(),
@@ -75,11 +75,16 @@ class ScanPaperViewModel(
 
   fun removePage(pageId: String) {
     _uiState.update { current ->
+      val removedPage = current.pages.firstOrNull { it.id == pageId }
       val filtered = current.pages.filter { it.id != pageId }
       val renumbered = filtered.mapIndexed { index, page ->
         page.copy(pageNumber = index + 1)
       }
-      current.copy(pages = renumbered)
+      val shouldClearPreview = removedPage != null && current.previewPageUri == removedPage.uri
+      current.copy(
+        pages = renumbered,
+        previewPageUri = if (shouldClearPreview) null else current.previewPageUri,
+      )
     }
   }
 
@@ -87,12 +92,23 @@ class ScanPaperViewModel(
     _uiState.update { it.copy(previewPageUri = uri) }
   }
 
+  fun setPreviewPage(page: LocalScannedPage?) {
+    _uiState.update { it.copy(previewPageUri = page?.uri) }
+  }
+
   fun clearError() {
     _uiState.update { it.copy(uploadError = null) }
   }
 
   fun clearAllPages() {
-    _uiState.update { it.copy(pages = emptyList(), uploadProgress = null, uploadError = null) }
+    _uiState.update {
+      it.copy(
+        pages = emptyList(),
+        uploadProgress = null,
+        uploadError = null,
+        previewPageUri = null,
+      )
+    }
   }
 
   fun finishScan(
@@ -107,15 +123,15 @@ class ScanPaperViewModel(
       return
     }
 
-    viewModelScope.launch {
-      _uiState.update {
-        it.copy(
-          isUploading = true,
-          uploadProgress = Pair(1, currentPages.size),
-          uploadError = null,
-        )
-      }
+    _uiState.update {
+      it.copy(
+        isUploading = true,
+        uploadProgress = Pair(1, currentPages.size),
+        uploadError = null,
+      )
+    }
 
+    viewModelScope.launch {
       val uris = currentPages.map { it.uri }
       val result = paperRepository.createPaperWithPages(
         context = context,
@@ -136,6 +152,7 @@ class ScanPaperViewModel(
               isUploading = false,
               uploadProgress = null,
               uploadError = null,
+              previewPageUri = null,
             )
           }
           onSuccess(paperId)

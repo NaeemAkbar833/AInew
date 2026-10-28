@@ -301,6 +301,7 @@ internal class FakePaperRepository(
 ) : PaperRepository {
   private val papers = initialPapers.toMutableList()
   val deletedStoragePaths = mutableListOf<String>()
+  var lastUploadedPageUris: List<Uri> = emptyList()
 
   override suspend fun getPapersByStudentId(studentId: String): Result<List<StudentPaper>> {
     return if (shouldFail) {
@@ -320,6 +321,7 @@ internal class FakePaperRepository(
     return if (shouldFail) {
       Result.failure(Exception("Failed to upload paper"))
     } else {
+      lastUploadedPageUris = pageUris.toList()
       val paperId = "paper-${papers.size + 1}"
       val pages = pageUris.mapIndexed { idx, _ ->
         onProgress(idx + 1, pageUris.size)
@@ -2486,4 +2488,67 @@ class ExampleRobolectricTest {
     assertEquals(1, rpcCalls.size)
     assertEquals("This result has already been approved.", viewModel.uiState.value.feedbackMessage)
   }
+
+  @Test
+  fun scanPaperViewModel_multiPhotoSession_gallerySelection_previewRemove_andUploadFlow() = runTest {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val fakePaperRepo = FakePaperRepository()
+    val student = Student(
+      id = "student-1",
+      classId = "class-1",
+      teacherId = "user-123",
+      name = "Zaid Ali",
+      fatherName = "Ali",
+      rollNumber = "CS-05",
+    )
+    val fakeStudentRepo = FakeStudentRepository(initialStudents = listOf(student))
+    val viewModel = ScanPaperViewModel(
+      paperRepository = fakePaperRepo,
+      studentRepository = fakeStudentRepo,
+    )
+
+    viewModel.loadStudentInfo("student-1")
+    assertEquals("Zaid Ali", viewModel.uiState.value.studentName)
+    assertEquals("CS-05", viewModel.uiState.value.studentRollNumber)
+
+    // Capture multiple photos in one camera session (pages stay as-is without auto-crop or enhancement)
+    val cameraUri1 = Uri.parse("content://gradescan/camera/answer_page_1.jpg")
+    val cameraUri2 = Uri.parse("content://gradescan/camera/answer_page_2.jpg")
+    viewModel.addPage(cameraUri1)
+    viewModel.addPage(cameraUri2)
+
+    // Add additional pages from Gallery
+    val galleryUri3 = Uri.parse("content://media/external/images/media/103")
+    viewModel.addPages(listOf(galleryUri3))
+
+    assertEquals(3, viewModel.uiState.value.pages.size)
+    assertEquals(cameraUri1, viewModel.uiState.value.pages[0].uri)
+    assertEquals(1, viewModel.uiState.value.pages[0].pageNumber)
+    assertEquals(cameraUri2, viewModel.uiState.value.pages[1].uri)
+    assertEquals(2, viewModel.uiState.value.pages[1].pageNumber)
+    assertEquals(galleryUri3, viewModel.uiState.value.pages[2].uri)
+    assertEquals(3, viewModel.uiState.value.pages[2].pageNumber)
+
+    // Preview page 2 and verify removing page 2 clears preview and renumbers remaining pages
+    val page2 = viewModel.uiState.value.pages[1]
+    viewModel.setPreviewPage(page2)
+    assertEquals(cameraUri2, viewModel.uiState.value.previewPageUri)
+
+    viewModel.removePage(page2.id)
+    assertNull(viewModel.uiState.value.previewPageUri)
+    assertEquals(2, viewModel.uiState.value.pages.size)
+    assertEquals(1, viewModel.uiState.value.pages[0].pageNumber)
+    assertEquals(cameraUri1, viewModel.uiState.value.pages[0].uri)
+    assertEquals(2, viewModel.uiState.value.pages[1].pageNumber)
+    assertEquals(galleryUri3, viewModel.uiState.value.pages[1].uri)
+
+    // Save/upload preserved pages in sequence
+    var savedPaperId: String? = null
+    viewModel.finishScan(context, "student-1", "class-1") { savedPaperId = it }
+    assertNotNull(savedPaperId)
+    assertEquals(listOf(cameraUri1, galleryUri3), fakePaperRepo.lastUploadedPageUris)
+    assertTrue(viewModel.uiState.value.pages.isEmpty())
+  }
 }
+
+

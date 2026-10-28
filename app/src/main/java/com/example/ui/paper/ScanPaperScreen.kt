@@ -4,9 +4,17 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.view.Surface as AndroidSurface
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,20 +29,25 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
@@ -49,7 +62,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -59,6 +71,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,9 +92,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.model.LocalScannedPage
@@ -104,8 +119,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Screen for capturing or picking multiple pages of a student's answer sheet,
- * previewing them in sequence, removing individual pages, and uploading
- * them to Supabase Storage (`student-papers` bucket) + creating database records.
+ * previewing them in sequence, removing individual pages, and uploading them
+ * to Supabase Storage (`student-papers` bucket) + creating database records.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,6 +138,7 @@ fun ScanPaperScreen(
   val coroutineScope = rememberCoroutineScope()
 
   var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+  var isCameraSessionOpen by remember { mutableStateOf(false) }
 
   LaunchedEffect(studentId) {
     viewModel.loadStudentInfo(studentId)
@@ -136,7 +152,7 @@ fun ScanPaperScreen(
     }
   }
 
-  // Camera capture launcher
+  // Fallback external camera capture launcher (used only if CameraX cannot initialize on device)
   val takePictureLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.TakePicture()
   ) { success ->
@@ -146,8 +162,7 @@ fun ScanPaperScreen(
     }
   }
 
-  // Helper to launch camera with a fresh temp file
-  val launchCameraCapture = {
+  val launchFallbackCameraCapture = {
     try {
       val (_, uri) = createTempImageFileAndUri(context)
       pendingCameraUri = uri
@@ -164,7 +179,7 @@ fun ScanPaperScreen(
     contract = ActivityResultContracts.RequestPermission()
   ) { isGranted ->
     if (isGranted) {
-      launchCameraCapture()
+      isCameraSessionOpen = true
     } else {
       coroutineScope.launch {
         snackbarHostState.showSnackbar("Camera permission is required to capture answer sheets.")
@@ -188,7 +203,7 @@ fun ScanPaperScreen(
       Manifest.permission.CAMERA,
     ) == PackageManager.PERMISSION_GRANTED
     if (hasCameraPermission) {
-      launchCameraCapture()
+      isCameraSessionOpen = true
     } else {
       cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
     }
@@ -434,7 +449,7 @@ fun ScanPaperScreen(
                 ScannedPageCard(
                   page = page,
                   isUploading = uiState.isUploading,
-                  onPreview = { viewModel.setPreviewPageUri(page.uri) },
+                  onPreview = { viewModel.setPreviewPage(page) },
                   onRemove = { viewModel.removePage(page.id) },
                 )
               }
@@ -455,14 +470,498 @@ fun ScanPaperScreen(
         }
       }
     }
+
+    // In-app multi-page CameraX session overlay
+    if (isCameraSessionOpen) {
+      MultiPageCameraSessionOverlay(
+        pages = uiState.pages,
+        studentName = uiState.studentName,
+        onPageCaptured = { capturedUri ->
+          viewModel.addPage(capturedUri)
+        },
+        onPreviewPage = { page ->
+          viewModel.setPreviewPage(page)
+        },
+        onRemovePage = { pageId ->
+          viewModel.removePage(pageId)
+        },
+        onDone = {
+          isCameraSessionOpen = false
+        },
+        onCameraUnavailableFallback = {
+          isCameraSessionOpen = false
+          launchFallbackCameraCapture()
+        },
+      )
+    }
+
+    // Fullscreen page preview dialog (works both from review grid and from camera thumbnail strip)
+    uiState.previewPageUri?.let { previewUri ->
+      val previewedPage = uiState.pages.firstOrNull { it.uri == previewUri }
+      ScannedPagePreviewDialog(
+        uri = previewUri,
+        page = previewedPage,
+        onDismiss = { viewModel.setPreviewPageUri(null) },
+      )
+    }
+  }
+}
+
+/**
+ * In-app multi-page CameraX capture session.
+ * Keeps the camera open across shots so the teacher can capture multiple pages in one session,
+ * displays captured page thumbnails in sequence, supports tapping any thumbnail to preview
+ * or remove a page, and provides a Done button when finished.
+ */
+@Composable
+private fun MultiPageCameraSessionOverlay(
+  pages: List<LocalScannedPage>,
+  studentName: String?,
+  onPageCaptured: (Uri) -> Unit,
+  onPreviewPage: (LocalScannedPage) -> Unit,
+  onRemovePage: (String) -> Unit,
+  onDone: () -> Unit,
+  onCameraUnavailableFallback: () -> Unit,
+) {
+  val context = LocalContext.current
+  val lifecycleOwner = LocalLifecycleOwner.current
+  val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
+
+  var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+  var isCapturingPhoto by remember { mutableStateOf(false) }
+  var captureErrorText by remember { mutableStateOf<String?>(null) }
+
+  val previewView = remember(context) {
+    PreviewView(context).apply {
+      scaleType = PreviewView.ScaleType.FIT_CENTER
+      implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+    }
   }
 
-  // Fullscreen page preview dialog
-  uiState.previewPageUri?.let { previewUri ->
-    ScannedPagePreviewDialog(
-      uri = previewUri,
-      onDismiss = { viewModel.setPreviewPageUri(null) },
+  BackHandler(enabled = true) {
+    onDone()
+  }
+
+  DisposableEffect(lifecycleOwner, previewView) {
+    val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+    val listener = Runnable {
+      try {
+        val cameraProvider = cameraProviderFuture.get()
+        val displayRotation = previewView.display?.rotation ?: AndroidSurface.ROTATION_0
+
+        val previewUseCase = Preview.Builder()
+          .setTargetRotation(displayRotation)
+          .build()
+          .also {
+            it.surfaceProvider = previewView.surfaceProvider
+          }
+
+        val captureUseCase = ImageCapture.Builder()
+          .setTargetRotation(displayRotation)
+          .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+          .build()
+
+        cameraProvider.unbindAll()
+
+        val hasBackCamera = runCatching {
+          cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)
+        }.getOrDefault(false)
+        val hasFrontCamera = runCatching {
+          cameraProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)
+        }.getOrDefault(false)
+
+        val selector = when {
+          hasBackCamera -> CameraSelector.DEFAULT_BACK_CAMERA
+          hasFrontCamera -> CameraSelector.DEFAULT_FRONT_CAMERA
+          else -> CameraSelector.DEFAULT_BACK_CAMERA
+        }
+
+        cameraProvider.bindToLifecycle(
+          lifecycleOwner,
+          selector,
+          previewUseCase,
+          captureUseCase,
+        )
+
+        imageCapture = captureUseCase
+      } catch (_: Throwable) {
+        onCameraUnavailableFallback()
+      }
+    }
+
+    try {
+      cameraProviderFuture.addListener(listener, mainExecutor)
+    } catch (_: Throwable) {
+      onCameraUnavailableFallback()
+    }
+
+    onDispose {
+      runCatching {
+        if (cameraProviderFuture.isDone) {
+          cameraProviderFuture.get().unbindAll()
+        }
+      }
+    }
+  }
+
+  val triggerCapture = {
+    val activeCapture = imageCapture
+    if (activeCapture != null && !isCapturingPhoto) {
+      try {
+        isCapturingPhoto = true
+        captureErrorText = null
+        activeCapture.targetRotation = previewView.display?.rotation ?: AndroidSurface.ROTATION_0
+        val (photoFile, photoUri) = createTempImageFileAndUri(context)
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+        activeCapture.takePicture(
+          outputOptions,
+          mainExecutor,
+          object : ImageCapture.OnImageSavedCallback {
+            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+              isCapturingPhoto = false
+              onPageCaptured(photoUri)
+            }
+
+            override fun onError(exception: ImageCaptureException) {
+              isCapturingPhoto = false
+              captureErrorText = "Could not capture photo. Please try again."
+            }
+          },
+        )
+      } catch (e: Exception) {
+        isCapturingPhoto = false
+        captureErrorText = "Capture failed: ${e.localizedMessage ?: "Unknown error"}"
+      }
+    }
+  }
+
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .background(Color.Black)
+      .testTag("multi_page_camera_session"),
+  ) {
+    // Live CameraX Preview
+    AndroidView(
+      factory = { previewView },
+      modifier = Modifier.fillMaxSize(),
     )
+
+    // Top Camera Bar
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .align(Alignment.TopCenter)
+        .background(
+          Brush.verticalGradient(
+            colors = listOf(
+              Color.Black.copy(alpha = 0.78f),
+              Color.Black.copy(alpha = 0.35f),
+              Color.Transparent,
+            )
+          )
+        )
+        .statusBarsPadding()
+        .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        IconButton(
+          onClick = onDone,
+          modifier = Modifier
+            .size(48.dp)
+            .testTag("camera_close_button"),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(36.dp)
+              .clip(CircleShape)
+              .background(Color.White.copy(alpha = 0.18f))
+              .border(1.dp, Color.White.copy(alpha = 0.32f), CircleShape),
+            contentAlignment = Alignment.Center,
+          ) {
+            Icon(
+              imageVector = Icons.Default.Close,
+              contentDescription = "Close Camera",
+              tint = Color.White,
+              modifier = Modifier.size(18.dp),
+            )
+          }
+        }
+
+        Column(
+          modifier = Modifier
+            .weight(1f)
+            .padding(horizontal = 8.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+          Text(
+            text = if (!studentName.isNullOrBlank()) "Scanning: $studentName" else "Multi-Page Camera",
+            fontFamily = BricolageGrotesqueFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.5.sp,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+          Text(
+            text = "Capture Page ${pages.size + 1}",
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.sp,
+            color = Color.White.copy(alpha = 0.85f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+
+        Surface(
+          shape = RoundedCornerShape(999.dp),
+          color = RoyalBlue.copy(alpha = 0.90f),
+          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+        ) {
+          Text(
+            text = "${pages.size} ${if (pages.size == 1) "Page" else "Pages"}",
+            fontFamily = FigtreeFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.5.sp,
+            color = Color.White,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+          )
+        }
+      }
+
+      captureErrorText?.let { err ->
+        Spacer(modifier = Modifier.height(6.dp))
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = Color(0xFFB91C1C).copy(alpha = 0.9f),
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          Text(
+            text = err,
+            fontFamily = FigtreeFontFamily,
+            fontSize = 12.sp,
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+          )
+        }
+      }
+    }
+
+    // Bottom Thumbnails + Shutter + Done Bar
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .align(Alignment.BottomCenter)
+        .background(
+          Brush.verticalGradient(
+            colors = listOf(
+              Color.Transparent,
+              Color.Black.copy(alpha = 0.72f),
+              Color.Black.copy(alpha = 0.92f),
+            )
+          )
+        )
+        .navigationBarsPadding()
+        .padding(top = 12.dp, bottom = 14.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      // Captured-page thumbnail strip
+      if (pages.isNotEmpty()) {
+        LazyRow(
+          contentPadding = PaddingValues(horizontal = 16.dp),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("camera_thumbnails_row"),
+        ) {
+          items(
+            items = pages,
+            key = { it.id },
+          ) { page ->
+            CameraCapturedThumbnailItem(
+              page = page,
+              onPreview = { onPreviewPage(page) },
+              onRemove = { onRemovePage(page.id) },
+            )
+          }
+        }
+      }
+
+      // Controls row: Hint | Shutter button | Done button
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        // Left: Hint
+        Box(
+          modifier = Modifier.weight(1f),
+          contentAlignment = Alignment.CenterStart,
+        ) {
+          Text(
+            text = if (pages.isNotEmpty()) {
+              "Tap thumbnail\nto preview"
+            } else {
+              "Tap shutter to\ncapture Page 1"
+            },
+            fontFamily = FigtreeFontFamily,
+            fontSize = 11.5.sp,
+            lineHeight = 14.sp,
+            color = Color.White.copy(alpha = 0.80f),
+          )
+        }
+
+        // Center: Shutter button
+        Box(
+          modifier = Modifier
+            .size(74.dp)
+            .clip(CircleShape)
+            .border(
+              width = 3.dp,
+              color = Color.White,
+              shape = CircleShape,
+            )
+            .padding(6.dp)
+            .clip(CircleShape)
+            .background(if (isCapturingPhoto) Color.White.copy(alpha = 0.5f) else Color.White)
+            .clickable(
+              enabled = !isCapturingPhoto && imageCapture != null,
+              role = Role.Button,
+              onClick = triggerCapture,
+            )
+            .testTag("camera_shutter_button"),
+          contentAlignment = Alignment.Center,
+        ) {
+          if (isCapturingPhoto) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(24.dp),
+              strokeWidth = 2.5.dp,
+              color = RoyalBlue,
+            )
+          } else {
+            Icon(
+              imageVector = Icons.Default.CameraAlt,
+              contentDescription = "Capture Page ${pages.size + 1}",
+              tint = RoyalBlue,
+              modifier = Modifier.size(26.dp),
+            )
+          }
+        }
+
+        // Right: Done button
+        Box(
+          modifier = Modifier.weight(1f),
+          contentAlignment = Alignment.CenterEnd,
+        ) {
+          Button(
+            onClick = onDone,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+              containerColor = if (pages.isNotEmpty()) RoyalBlue else Color.White.copy(alpha = 0.22f),
+              contentColor = Color.White,
+            ),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier
+              .height(48.dp)
+              .testTag("camera_done_button"),
+          ) {
+            Icon(
+              imageVector = Icons.Default.Check,
+              contentDescription = null,
+              modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = if (pages.isNotEmpty()) "Done (${pages.size})" else "Done",
+              fontFamily = BricolageGrotesqueFontFamily,
+              fontWeight = FontWeight.Bold,
+              fontSize = 13.sp,
+              maxLines = 1,
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun CameraCapturedThumbnailItem(
+  page: LocalScannedPage,
+  onPreview: () -> Unit,
+  onRemove: () -> Unit,
+) {
+  Box(
+    modifier = Modifier
+      .width(66.dp)
+      .height(84.dp)
+      .clip(RoundedCornerShape(10.dp))
+      .background(Color(0xFF1E293B))
+      .border(1.5.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(10.dp))
+      .clickable(onClick = onPreview)
+      .testTag("camera_thumbnail_${page.pageNumber}"),
+  ) {
+    AsyncImage(
+      model = page.uri,
+      contentDescription = "Captured Page ${page.pageNumber}",
+      contentScale = ContentScale.Crop,
+      modifier = Modifier.fillMaxSize(),
+    )
+
+    // Page number pill at bottom-left
+    Surface(
+      shape = RoundedCornerShape(4.dp),
+      color = RoyalBlue.copy(alpha = 0.92f),
+      modifier = Modifier
+        .align(Alignment.BottomStart)
+        .padding(4.dp),
+    ) {
+      Text(
+        text = "P${page.pageNumber}",
+        fontFamily = FigtreeFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 9.5.sp,
+        color = Color.White,
+        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+      )
+    }
+
+    // Remove button at top-right
+    Box(
+      modifier = Modifier
+        .align(Alignment.TopEnd)
+        .size(28.dp)
+        .clickable(
+          role = Role.Button,
+          onClick = onRemove,
+        )
+        .testTag("camera_remove_page_${page.pageNumber}"),
+      contentAlignment = Alignment.TopEnd,
+    ) {
+      Box(
+        modifier = Modifier
+          .padding(3.dp)
+          .size(18.dp)
+          .clip(CircleShape)
+          .background(Color.Black.copy(alpha = 0.75f))
+          .border(1.dp, Color.White.copy(alpha = 0.6f), CircleShape),
+        contentAlignment = Alignment.Center,
+      ) {
+        Icon(
+          imageVector = Icons.Default.Close,
+          contentDescription = "Remove Page ${page.pageNumber}",
+          tint = Color.White,
+          modifier = Modifier.size(11.dp),
+        )
+      }
+    }
   }
 }
 
@@ -564,7 +1063,7 @@ private fun InstructionBanner() {
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
-          text = "Add pages in sequence (Page 1, Page 2, etc.). Ensure handwriting is clear and well-lit for accurate OCR.",
+          text = "Add pages in sequence (Page 1, Page 2, etc.). Tap any page to preview or remove before saving.",
           fontFamily = FigtreeFontFamily,
           fontSize = 12.sp,
           lineHeight = 16.sp,
@@ -827,7 +1326,7 @@ private fun ScannedPageCard(
         }
       }
 
-      // Bottom strip - Display only compact green "Ready" status label
+      // Bottom status strip
       Box(
         modifier = Modifier
           .fillMaxWidth()
@@ -851,8 +1350,8 @@ private fun ScannedPageCard(
               modifier = Modifier.size(11.dp),
             )
             Text(
-              text = "Ready",
-              fontSize = 11.sp,
+              text = "Ready to Upload",
+              fontSize = 10.5.sp,
               fontFamily = FigtreeFontFamily,
               fontWeight = FontWeight.Bold,
               color = StatusSuccess,
@@ -867,6 +1366,7 @@ private fun ScannedPageCard(
 @Composable
 private fun ScannedPagePreviewDialog(
   uri: Uri,
+  page: LocalScannedPage? = null,
   onDismiss: () -> Unit,
 ) {
   Dialog(onDismissRequest = onDismiss) {
@@ -891,7 +1391,7 @@ private fun ScannedPagePreviewDialog(
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
           Text(
-            text = "Page Preview",
+            text = if (page != null) "Page ${page.pageNumber} Preview" else "Page Preview",
             fontFamily = BricolageGrotesqueFontFamily,
             fontSize = 15.5.sp,
             fontWeight = FontWeight.Bold,
@@ -957,6 +1457,7 @@ private fun BottomScanActionBar(
     Column(
       modifier = Modifier
         .fillMaxWidth()
+        .navigationBarsPadding()
         .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
       Row(
