@@ -1,7 +1,11 @@
 package com.example.ui.auth
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -130,17 +134,16 @@ fun LoginScreen(
                 modifier = Modifier.size(38.dp),
               ) {
                 Box(contentAlignment = Alignment.Center) {
-                  Icon(
-                    imageVector = Icons.Default.Description,
-                    contentDescription = "GradeScan Logo",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp),
+                  Image(
+                    painter = painterResource(R.drawable.ic_paperwise_logo),
+                    contentDescription = "PaperWise Logo",
+                    modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)),
                   )
                 }
               }
               Column {
                 Text(
-                  text = "GradeScan",
+                  text = "PaperWise",
                   fontFamily = BricolageGrotesqueFontFamily,
                   fontSize = 20.sp,
                   fontWeight = FontWeight.Bold,

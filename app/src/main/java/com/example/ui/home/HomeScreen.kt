@@ -123,7 +123,7 @@ fun HomeScreen(
       },
       text = {
         Text(
-          text = "Are you sure you want to sign out of GradeScan?",
+          text = "Are you sure you want to sign out of PaperWise?",
           fontFamily = FigtreeFontFamily,
           fontSize = 14.sp,
           lineHeight = 20.sp,
@@ -238,7 +238,7 @@ fun HomeScreen(
 
               Column(modifier = Modifier.weight(1f)) {
                 Text(
-                  text = "GradeScan",
+                  text = "PaperWise",
                   fontFamily = BricolageGrotesqueFontFamily,
                   fontSize = 16.sp,
                   fontWeight = FontWeight.Bold,

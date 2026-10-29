@@ -677,10 +677,10 @@ class FakeOcrRepository(
 class ExampleRobolectricTest {
 
   @Test
-  fun `verify app name resource is GradeScan`() {
+  fun `verify app name resource is PaperWise`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("GradeScan", appName)
+    assertEquals("PaperWise", appName)
   }
 
   @Test

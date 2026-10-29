@@ -8,7 +8,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -160,11 +164,10 @@ private fun SplashScreenContent(scale: Float, alpha: Float) {
               color = RoyalBlue.copy(alpha = 0.10f),
             ) {
               Box(contentAlignment = Alignment.Center) {
-                Icon(
-                  imageVector = Icons.Default.DocumentScanner,
-                  contentDescription = "GradeScan Logo",
-                  modifier = Modifier.size(32.dp),
-                  tint = RoyalBlue,
+                Image(
+                  painter = painterResource(R.drawable.ic_paperwise_logo),
+                  contentDescription = "PaperWise Logo",
+                  modifier = Modifier.size(38.dp).clip(RoundedCornerShape(8.dp)),
                 )
               }
             }
@@ -193,7 +196,7 @@ private fun SplashScreenContent(scale: Float, alpha: Float) {
       Spacer(modifier = Modifier.height(10.dp))
 
       Text(
-        text = "GradeScan",
+        text = "PaperWise",
         fontFamily = BricolageGrotesqueFontFamily,
         fontSize = 28.sp,
         fontWeight = FontWeight.Bold,

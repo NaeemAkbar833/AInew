@@ -1560,7 +1560,7 @@ internal fun exportClassResultsToPdf(
     .trim('_')
   val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
   val fileName = buildString {
-    append("GradeScan_")
+    append("PaperWise_")
     append(subjectSlug)
     if (semesterSlug.isNotBlank()) {
       append("_")
@@ -1797,7 +1797,7 @@ internal fun generateClassResultsPdfBytes(
     val textY = pageHeight - marginBottom + 2f
 
     textPaint.textAlign = Paint.Align.LEFT
-    canvas.drawText("GradeScan • Official Class Results Report", marginH, textY, textPaint)
+    canvas.drawText("PaperWise • Official Class Results Report", marginH, textY, textPaint)
 
     textPaint.textAlign = Paint.Align.RIGHT
     canvas.drawText("Page $pageNumber of $totalPages", marginH + contentWidth, textY, textPaint)

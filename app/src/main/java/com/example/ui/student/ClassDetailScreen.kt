@@ -972,7 +972,7 @@ fun ClassDetailScreen(
                       text = when {
                         uiState.extractionProgress < 0.1f -> "Starting extraction..."
                         uiState.extractionProgress < 0.4f -> "Optimizing photos for AI..."
-                        uiState.extractionProgress < 0.6f -> "Sending to GradeScan AI..."
+                        uiState.extractionProgress < 0.6f -> "Sending to PaperWise AI..."
                         uiState.extractionProgress < 0.95f -> "Processing student list..."
                         else -> "Finalizing..."
                       },
