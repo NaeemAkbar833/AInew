@@ -6,12 +6,19 @@ import com.example.data.model.ClassRoom
 import com.example.data.model.Student
 import com.example.data.repository.ClassRepository
 import com.example.data.repository.StudentRepository
+import com.example.data.repository.deleteAppOwnedTempCameraFile
 import com.example.data.model.ExtractedStudent
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.content.Context
 import android.net.Uri
 import android.graphics.Bitmap
@@ -19,6 +26,7 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import android.util.Log
 import java.io.ByteArrayOutputStream
+import java.io.File
 
 data class StudentsUiState(
   val classRoom: ClassRoom? = null,
@@ -47,39 +55,62 @@ class StudentViewModel(
 
   private val _uiState = MutableStateFlow(StudentsUiState())
   val uiState: StateFlow<StudentsUiState> = _uiState.asStateFlow()
+  @Volatile
+  private var cachedCacheDir: File? = null
+  private var loadGeneration: Long = 0L
+  private var loadJob: Job? = null
 
   fun loadClassAndStudents(classId: String) {
     if (classId.isBlank()) return
-    viewModelScope.launch {
+    val myGeneration = ++loadGeneration
+    loadJob?.cancel()
+    loadJob = viewModelScope.launch {
       _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+      try {
+        // Fetch class metadata and student roster concurrently
+        val classDeferred = async { classRepository.getClassById(classId) }
+        val studentsDeferred = async { studentRepository.getStudentsByClassId(classId) }
 
-      // 1. Fetch class metadata
-      val classResult = classRepository.getClassById(classId)
-      val loadedClass = classResult.getOrNull()
+        val classResult = classDeferred.await()
+        classResult.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+        val loadedClass = classResult.getOrNull()
+        val studentsResult = studentsDeferred.await()
 
-      // 2. Fetch students
-      val studentsResult = studentRepository.getStudentsByClassId(classId)
-      studentsResult.fold(
-        onSuccess = { list ->
-          _uiState.update {
-            it.copy(
-              classRoom = loadedClass ?: it.classRoom,
-              students = list,
-              isLoading = false,
-              errorMessage = null,
-            )
+        if (myGeneration != loadGeneration) return@launch
+
+        studentsResult.fold(
+          onSuccess = { list ->
+            if (myGeneration != loadGeneration) return@fold
+            _uiState.update {
+              it.copy(
+                classRoom = loadedClass ?: it.classRoom,
+                students = list,
+                isLoading = false,
+                errorMessage = null,
+              )
+            }
+          },
+          onFailure = { error ->
+            if (error is CancellationException) throw error
+            if (myGeneration != loadGeneration) return@fold
+            _uiState.update {
+              it.copy(
+                classRoom = loadedClass ?: it.classRoom,
+                isLoading = false,
+                errorMessage = error.localizedMessage ?: "Failed to load students.",
+              )
+            }
           }
-        },
-        onFailure = { error ->
-          _uiState.update {
-            it.copy(
-              classRoom = loadedClass ?: it.classRoom,
-              isLoading = false,
-              errorMessage = error.localizedMessage ?: "Failed to load students.",
-            )
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } finally {
+        if (myGeneration == loadGeneration) {
+          _uiState.update { state ->
+            if (state.isLoading) state.copy(isLoading = false) else state
           }
         }
-      )
+      }
     }
   }
 
@@ -183,24 +214,30 @@ class StudentViewModel(
 
   fun onImagesSelected(context: Context, classId: String, uris: List<Uri>) {
     if (uris.isEmpty()) return
+    val appContext = context.applicationContext ?: context
+    cachedCacheDir = appContext.cacheDir
     viewModelScope.launch {
       _uiState.update { it.copy(isExtracting = true, extractionProgress = 0.05f, batchErrorMessage = null, pendingCaptureUris = emptyList()) }
       try {
-        // 1. Prepare and compress images
+        // 1. Prepare and compress images off the main thread
         val imagesBase64 = mutableListOf<String>()
         var totalSize = 0L
-        
-        uris.forEachIndexed { index, uri ->
-          val bytes = readCompressedImageBytes(context, uri)
-            ?: throw IllegalStateException("Could not process image ${index + 1}")
-          
-          totalSize += bytes.size
-          // Safety: 8MB total limit
-          if (totalSize > 8 * 1024 * 1024) {
-             throw IllegalStateException("The selected photos are too large. Please capture smaller images or use fewer pages.")
+
+        for ((index, uri) in uris.withIndex()) {
+          val encodedPage = withContext(Dispatchers.IO) {
+            val bytes = readCompressedImageBytes(appContext, uri)
+              ?: throw IllegalStateException("Could not process image ${index + 1}")
+
+            totalSize += bytes.size
+            // Safety: 8MB total limit
+            if (totalSize > 8 * 1024 * 1024) {
+              throw IllegalStateException("The selected photos are too large. Please capture smaller images or use fewer pages.")
+            }
+
+            Base64.encodeToString(bytes, Base64.NO_WRAP)
           }
 
-          imagesBase64.add(Base64.encodeToString(bytes, Base64.NO_WRAP))
+          imagesBase64.add(encodedPage)
           _uiState.update { it.copy(extractionProgress = 0.05f + ((index + 1).toFloat() / uris.size * 0.35f)) }
         }
 
@@ -229,6 +266,8 @@ class StudentViewModel(
             }
           }
         )
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         _uiState.update {
           it.copy(
@@ -236,6 +275,12 @@ class StudentViewModel(
             extractionProgress = 0f,
             batchErrorMessage = e.localizedMessage ?: "An error occurred during import."
           )
+        }
+      } finally {
+        withContext(NonCancellable + Dispatchers.IO) {
+          uris.forEach { uri ->
+            deleteAppOwnedTempCameraFile(appContext, uri, cachedCacheDir)
+          }
         }
       }
     }
@@ -270,10 +315,14 @@ class StudentViewModel(
         BitmapFactory.decodeStream(stream, null, decodeOptions)
       } ?: return null
 
-      val outputStream = ByteArrayOutputStream()
-      // Quality 85 balances readability and payload size
-      bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
-      outputStream.toByteArray()
+      try {
+        val outputStream = ByteArrayOutputStream()
+        // Quality 85 balances readability and payload size
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+        outputStream.toByteArray()
+      } finally {
+        bitmap.recycle()
+      }
     } catch (e: Exception) {
       Log.e("StudentViewModel", "Failed reading image bytes from Uri: $uri", e)
       null
@@ -362,7 +411,15 @@ class StudentViewModel(
   }
 
   fun clearPendingPages() {
+    val urisToClean = _uiState.value.pendingCaptureUris
     _uiState.update { it.copy(pendingCaptureUris = emptyList()) }
+    if (urisToClean.isNotEmpty()) {
+      viewModelScope.launch(Dispatchers.IO) {
+        urisToClean.forEach { uri ->
+          deleteAppOwnedTempCameraFile(null, uri, cachedCacheDir)
+        }
+      }
+    }
   }
 
   fun startExtractionFromPending(context: Context, classId: String) {
@@ -373,5 +430,15 @@ class StudentViewModel(
 
   fun dismissBatchErrorMessage() {
     _uiState.update { it.copy(batchErrorMessage = null) }
+  }
+
+  override fun onCleared() {
+    val urisToClean = _uiState.value.pendingCaptureUris
+    if (urisToClean.isNotEmpty()) {
+      urisToClean.forEach { uri ->
+        deleteAppOwnedTempCameraFile(null, uri, cachedCacheDir)
+      }
+    }
+    super.onCleared()
   }
 }

@@ -141,23 +141,8 @@ fun TeacherReviewScreen(
   }
 
   // Load student data and evaluation if not already present
-  LaunchedEffect(studentId, paperId) {
-    if (uiState.student == null || uiState.student?.id != studentId) {
-      viewModel.loadStudentAndPapers(studentId)
-    }
-    if (paperId.isNotBlank() &&
-      (uiState.evaluationResult == null || uiState.evaluatedPaperId != paperId) &&
-      uiState.isEvaluatingPaperId != paperId
-    ) {
-      val knownPaper = uiState.papers.find { it.id == paperId }
-      val isKnownApproved = knownPaper?.status.equals("approved", ignoreCase = true) ||
-        knownPaper?.evaluation?.status.equals("approved", ignoreCase = true)
-      if (isKnownApproved) {
-        viewModel.openApprovedEvaluation(paperId)
-      } else {
-        viewModel.runAiEvaluation(paperId)
-      }
-    }
+  LaunchedEffect(studentId, paperId, uiState.student?.id, uiState.isLoading, uiState.papers, uiState.errorMessage) {
+    viewModel.ensureEvaluationLoadedForReview(studentId = studentId, paperId = paperId)
   }
 
   // Show feedback or mark validation error in snackbar if available
@@ -560,7 +545,7 @@ fun TeacherReviewScreen(
           verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
           // Loading state for evaluation / approved result retrieval
-          if (uiState.isEvaluatingPaperId == paperId) {
+          if (uiState.isEvaluatingPaperId == paperId || (uiState.isLoading && uiState.evaluationResult == null)) {
             Card(
               modifier = Modifier.fillMaxWidth(),
               shape = RoundedCornerShape(16.dp),
@@ -1588,18 +1573,31 @@ private fun FullQuestionCard(
   }
 }
 
+private val PROVISIONAL_REF_ANSWER_COLON_REGEX =
+  Regex("\\[Provisional Reference Answer\\]:\\s*", RegexOption.IGNORE_CASE)
+private val PROVISIONAL_CRITERIA_COLON_REGEX =
+  Regex("\\[Provisional Criteria\\]:\\s*", RegexOption.IGNORE_CASE)
+private val PROVISIONAL_REF_ANSWER_TAG_REGEX =
+  Regex("\\[provisional reference answer\\]", RegexOption.IGNORE_CASE)
+private val PROVISIONAL_CRITERIA_TAG_REGEX =
+  Regex("\\[provisional criteria\\]", RegexOption.IGNORE_CASE)
+private val PROVISIONAL_RUBRIC_COLON_REGEX =
+  Regex("\\[Provisional Rubric\\]:\\s*", RegexOption.IGNORE_CASE)
+private val PROVISIONAL_RUBRIC_TAG_REGEX =
+  Regex("\\[provisional rubric\\]", RegexOption.IGNORE_CASE)
+
 /**
  * Scrubs provisional bracket labels like [provisional reference answer] from UI text.
  */
 private fun cleanProvisionalText(text: String?): String {
   if (text.isNullOrBlank()) return ""
   return stripSelectionRuleTagFromCriteria(text)
-    .replace(Regex("\\[Provisional Reference Answer\\]:\\s*", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[Provisional Criteria\\]:\\s*", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[provisional reference answer\\]", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[provisional criteria\\]", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[Provisional Rubric\\]:\\s*", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[provisional rubric\\]", RegexOption.IGNORE_CASE), "")
+    .replace(PROVISIONAL_REF_ANSWER_COLON_REGEX, "")
+    .replace(PROVISIONAL_CRITERIA_COLON_REGEX, "")
+    .replace(PROVISIONAL_REF_ANSWER_TAG_REGEX, "")
+    .replace(PROVISIONAL_CRITERIA_TAG_REGEX, "")
+    .replace(PROVISIONAL_RUBRIC_COLON_REGEX, "")
+    .replace(PROVISIONAL_RUBRIC_TAG_REGEX, "")
     .trim()
 }
 

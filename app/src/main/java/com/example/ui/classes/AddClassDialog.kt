@@ -59,6 +59,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +86,8 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.ClassRoom
 import com.example.data.model.ClassTiming
+import com.example.data.repository.deleteAppOwnedTempCameraFile
+import com.example.data.repository.readHighFidelityImageBytesInternal
 import com.example.ui.theme.BorderGray
 import com.example.ui.theme.BricolageGrotesqueFontFamily
 import com.example.ui.theme.DarkRoyalBlue
@@ -97,7 +100,9 @@ import com.example.ui.theme.StatusWarning
 import com.example.ui.theme.StatusWarningContainer
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 private val SEMESTER_OPTIONS = listOf("1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th")
@@ -130,6 +135,16 @@ fun AddClassDialog(
   var selectedFileName by remember { mutableStateOf<String?>(null) }
   var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
 
+  DisposableEffect(Unit) {
+    onDispose {
+      val leftoverUri = tempCameraUri
+      tempCameraUri = null
+      if (leftoverUri != null) {
+        deleteAppOwnedTempCameraFile(context, leftoverUri)
+      }
+    }
+  }
+
   val saveButtonBrush = Brush.horizontalGradient(
     colors = listOf(DarkRoyalBlue, RoyalBlue)
   )
@@ -144,13 +159,21 @@ fun AddClassDialog(
     contract = ActivityResultContracts.PickVisualMedia()
   ) { uri: Uri? ->
     if (uri != null) {
-      try {
-        context.contentResolver.openInputStream(uri)?.use { stream ->
-          selectedImageBytes = stream.readBytes()
+      coroutineScope.launch {
+        val bytes = withContext(Dispatchers.IO) {
+          try {
+            readHighFidelityImageBytesInternal(context, uri)
+              ?: context.contentResolver.openInputStream(uri)?.use { stream ->
+                stream.readBytes()
+              }
+          } catch (e: Exception) {
+            null
+          }
+        }
+        if (bytes != null) {
+          selectedImageBytes = bytes
           selectedFileName = "question_paper_gallery.jpg"
         }
-      } catch (e: Exception) {
-        // Handle read error gracefully
       }
     }
   }
@@ -158,20 +181,43 @@ fun AddClassDialog(
   val cameraLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.TakePicture()
   ) { success: Boolean ->
-    if (success && tempCameraUri != null) {
-      try {
-        context.contentResolver.openInputStream(tempCameraUri!!)?.use { stream ->
-          selectedImageBytes = stream.readBytes()
+    val capturedUri = tempCameraUri
+    tempCameraUri = null
+    if (capturedUri != null) {
+      coroutineScope.launch {
+        val bytes = withContext(Dispatchers.IO) {
+          try {
+            if (success) {
+              readHighFidelityImageBytesInternal(context, capturedUri)
+                ?: context.contentResolver.openInputStream(capturedUri)?.use { stream ->
+                  stream.readBytes()
+                }
+            } else {
+              null
+            }
+          } catch (e: Exception) {
+            null
+          } finally {
+            deleteAppOwnedTempCameraFile(context, capturedUri)
+          }
+        }
+        if (bytes != null) {
+          selectedImageBytes = bytes
           selectedFileName = "question_paper_camera.jpg"
         }
-      } catch (e: Exception) {
-        // Handle read error gracefully
       }
     }
   }
 
   fun launchCamera() {
     try {
+      val previousUri = tempCameraUri
+      if (previousUri != null) {
+        tempCameraUri = null
+        coroutineScope.launch(Dispatchers.IO) {
+          deleteAppOwnedTempCameraFile(context, previousUri)
+        }
+      }
       val tempFile = File.createTempFile("qp_capture_", ".jpg", context.cacheDir)
       val uri = FileProvider.getUriForFile(
         context,

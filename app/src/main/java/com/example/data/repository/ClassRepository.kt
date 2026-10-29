@@ -7,11 +7,23 @@ import com.example.data.model.CreateClassRequest
 import com.example.data.remote.SupabaseClientProvider
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Count
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.storage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import java.util.UUID
+
+@Serializable
+private data class ClassCountIdRow(
+  @SerialName("id")
+  val id: String? = null,
+)
 
 interface ClassRepository {
   suspend fun getClassesByExamId(examId: String): Result<List<ClassRoom>>
@@ -27,6 +39,7 @@ interface ClassRepository {
     fileExtension: String?,
   ): Result<ClassRoom>
   suspend fun deleteClass(id: String): Result<Unit>
+  suspend fun getClassCountForTeacher(): Result<Int>
 }
 
 class SupabaseClassRepository(
@@ -58,6 +71,8 @@ class SupabaseClassRepository(
           .decodeList<ClassRoom>()
 
         Result.success(classes)
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching classes for exam $examId", e)
         Result.failure(e)
@@ -86,8 +101,42 @@ class SupabaseClassRepository(
           .decodeSingleOrNull<ClassRoom>()
 
         Result.success(classRoom)
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching class with id: $classId", e)
+        Result.failure(e)
+      }
+    }
+
+  override suspend fun getClassCountForTeacher(): Result<Int> =
+    withContext(Dispatchers.IO) {
+      try {
+        if (!SupabaseClientProvider.isConfigured()) {
+          return@withContext Result.failure(
+            IllegalStateException("Supabase is not configured yet.")
+          )
+        }
+
+        val teacherId = authRepository.getCurrentUserId()
+          ?: return@withContext Result.failure(IllegalStateException("Teacher is not authenticated."))
+
+        val result = SupabaseClientProvider.client.postgrest["classes"]
+          .select(Columns.list("id")) {
+            count(Count.EXACT)
+            filter {
+              eq("teacher_id", teacherId)
+            }
+          }
+
+        val count = result.countOrNull()?.toInt()
+          ?: result.decodeList<ClassCountIdRow>().size
+
+        Result.success(count)
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Error fetching class count for teacher", e)
         Result.failure(e)
       }
     }
@@ -185,30 +234,39 @@ class SupabaseClassRepository(
         )
       }
 
-      // 2. Collect and delete all student paper page images for this class from student-papers bucket FIRST
-      val studentPaperPaths = StorageCleanupHelper.collectStudentPaperPathsForClasses(
-        classIds = listOf(id),
-        teacherId = teacherId,
-      )
+      // 2. Collect student paper paths/IDs and question paper paths concurrently BEFORE any deletion
+      val (cleanupTarget, questionPaperPaths) = coroutineScope {
+        val studentTargetDeferred = async {
+          StorageCleanupHelper.collectClassCleanupTarget(
+            classIds = listOf(id),
+            teacherId = teacherId,
+          )
+        }
+        val questionPathsDeferred = async {
+          StorageCleanupHelper.collectQuestionPaperPathsForClasses(
+            classRooms = classRows,
+            teacherId = teacherId,
+          )
+        }
+        studentTargetDeferred.await() to questionPathsDeferred.await()
+      }
+
+      // 3. Delete student paper page images and question paper file(s) from Storage FIRST
       StorageCleanupHelper.deleteFromBucket(
         bucketName = StorageCleanupHelper.STUDENT_PAPERS_BUCKET,
-        rawPaths = studentPaperPaths,
-      )
-
-      // 3. Collect and delete question paper file(s) for this class from question-papers bucket FIRST
-      val questionPaperPaths = StorageCleanupHelper.collectQuestionPaperPathsForClasses(
-        classRooms = classRows,
-        teacherId = teacherId,
+        rawPaths = cleanupTarget.studentPaperPaths,
       )
       StorageCleanupHelper.deleteFromBucket(
         bucketName = BUCKET_NAME,
         rawPaths = questionPaperPaths,
       )
 
-      // 4. Delete associated child records and class database record
+      // 4. Delete associated child records (reusing precollected studentIds & paperIds) and class database record
       StorageCleanupHelper.deleteClassChildRecords(
         classIds = listOf(id),
         teacherId = teacherId,
+        precollectedStudentIds = cleanupTarget.studentIds,
+        precollectedPaperIds = cleanupTarget.paperIds,
       )
 
       val deletedClasses = SupabaseClientProvider.client.postgrest["classes"]

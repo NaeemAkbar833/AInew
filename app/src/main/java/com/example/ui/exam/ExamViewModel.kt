@@ -5,6 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.Exam
 import com.example.data.model.ExamType
 import com.example.data.repository.ExamRepository
+import com.example.data.repository.AuthRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,37 +31,129 @@ data class ExamsUiState(
 
 class ExamViewModel(
   private val examRepository: ExamRepository,
+  private val authRepository: AuthRepository? = null,
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow(ExamsUiState())
   val uiState: StateFlow<ExamsUiState> = _uiState.asStateFlow()
 
+  private var loadJob: Job? = null
+  private var activeOrLoadedUserId: String? = null
+  private var requestGeneration: Long = 0L
+
   init {
     loadExams()
   }
 
-  fun loadExams() {
-    viewModelScope.launch {
+  /**
+   * Loads exams for the currently authenticated teacher.
+   * Concurrent in-flight calls for the same teacher are deduplicated unless forceRefresh is true.
+   * Premature requests before the authenticated Supabase session is ready are safely avoided.
+   * Each request is assigned a unique generation ID so cancelled or stale requests can never
+   * overwrite or clear state belonging to a newer request or another account.
+   */
+  fun loadExams(forceRefresh: Boolean = false) {
+    val currentUserId = authRepository?.getCurrentUserId()
+    if (authRepository != null) {
+      if (currentUserId == null) {
+        if (
+          activeOrLoadedUserId != null ||
+          _uiState.value.exams.isNotEmpty() ||
+          _uiState.value.selectedExam != null ||
+          _uiState.value.isLoading
+        ) {
+          clearExams()
+        }
+        return
+      }
+      if (activeOrLoadedUserId != null && activeOrLoadedUserId != currentUserId) {
+        clearExams()
+      }
+    }
+
+    if (loadJob?.isActive == true) {
+      if (!forceRefresh) {
+        return
+      }
+      loadJob?.cancel()
+      loadJob = null
+    }
+
+    val requestedUserId = currentUserId
+    activeOrLoadedUserId = requestedUserId
+    val myGeneration = ++requestGeneration
+
+    loadJob = viewModelScope.launch {
       _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-      val result = examRepository.getExams()
-      result.fold(
-        onSuccess = { list ->
+      try {
+        val result = examRepository.getExams()
+
+        // If superseded by clearExams() or a newer loadExams() request, do not touch state
+        if (myGeneration != requestGeneration) {
+          return@launch
+        }
+
+        // Verify that the authenticated user ID still matches the user who initiated the request
+        if (authRepository != null && authRepository.getCurrentUserId() != requestedUserId) {
+          activeOrLoadedUserId = null
           _uiState.update {
             it.copy(
-              exams = list,
+              exams = emptyList(),
+              selectedExam = null,
               isLoading = false,
               errorMessage = null,
             )
           }
-        },
-        onFailure = { error ->
-          _uiState.update {
-            it.copy(
-              isLoading = false,
-              errorMessage = error.localizedMessage ?: "Failed to load exams.",
-            )
-          }
+          return@launch
         }
+
+        result.fold(
+          onSuccess = { list ->
+            if (myGeneration == requestGeneration) {
+              _uiState.update {
+                it.copy(
+                  exams = list,
+                  isLoading = false,
+                  errorMessage = null,
+                )
+              }
+            }
+          },
+          onFailure = { error ->
+            if (error is CancellationException) {
+              throw error
+            }
+            if (myGeneration == requestGeneration) {
+              _uiState.update {
+                it.copy(
+                  isLoading = false,
+                  errorMessage = error.localizedMessage ?: "Failed to load exams.",
+                )
+              }
+            }
+          }
+        )
+      } catch (e: CancellationException) {
+        if (myGeneration == requestGeneration) {
+          _uiState.update { it.copy(isLoading = false) }
+        }
+        throw e
+      }
+    }
+  }
+
+  fun clearExams() {
+    requestGeneration++
+    loadJob?.cancel()
+    loadJob = null
+    activeOrLoadedUserId = null
+    _uiState.update {
+      it.copy(
+        exams = emptyList(),
+        selectedExam = null,
+        isLoading = false,
+        isLoadingDetail = false,
+        errorMessage = null,
       )
     }
   }

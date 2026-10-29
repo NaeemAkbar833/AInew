@@ -18,7 +18,10 @@ import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.BucketApi
 import io.github.jan.supabase.storage.storage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -26,6 +29,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
@@ -47,6 +51,17 @@ internal data class ClassStorageProjection(
   val id: String? = null,
   @SerialName("question_paper_path")
   val questionPaperPath: String? = null,
+)
+
+internal data class StudentCleanupTarget(
+  val paperIds: List<String>,
+  val storagePaths: List<String>,
+)
+
+internal data class ClassCleanupTarget(
+  val studentIds: List<String>,
+  val paperIds: List<String>,
+  val studentPaperPaths: List<String>,
 )
 
 internal object StorageCleanupHelper {
@@ -109,6 +124,35 @@ internal object StorageCleanupHelper {
       )
   }
 
+  private suspend fun verifyObjectDeleted(
+    bucketName: String,
+    path: String,
+    bucket: BucketApi,
+  ) {
+    val stillExists = try {
+      bucket.exists(path)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      if (isAlreadyMissingStorageError(e)) {
+        false
+      } else {
+        Log.e(TAG, "Failed verifying deletion of $path from $bucketName", e)
+        throw IllegalStateException(
+          "Failed to delete image files from cloud storage ($bucketName). Please try again.",
+          e,
+        )
+      }
+    }
+
+    if (stillExists) {
+      Log.e(TAG, "Storage object still exists after delete in $bucketName: $path")
+      throw IllegalStateException(
+        "Failed to delete image files from cloud storage ($bucketName): file could not be removed ($path). Please check storage permissions and try again."
+      )
+    }
+  }
+
   suspend fun deleteFromBucket(
     bucketName: String,
     rawPaths: Iterable<String?>,
@@ -119,18 +163,27 @@ internal object StorageCleanupHelper {
 
     val bucket = bucketApi ?: SupabaseClientProvider.client.storage.from(bucketName)
     for (chunk in paths.chunked(100)) {
+      var verifiedInFallback = false
       try {
         bucket.delete(chunk)
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         if (chunk.size == 1 && isAlreadyMissingStorageError(e)) {
           Log.w(TAG, "Storage object already absent in $bucketName: ${chunk.first()}")
+          verifiedInFallback = true
         } else if (chunk.size > 1 && isAlreadyMissingStorageError(e)) {
+          verifiedInFallback = true
           for (singlePath in chunk) {
+            var singleAlreadyMissing = false
             try {
               bucket.delete(listOf(singlePath))
+            } catch (singleCancel: CancellationException) {
+              throw singleCancel
             } catch (singleError: Exception) {
               if (isAlreadyMissingStorageError(singleError)) {
                 Log.w(TAG, "Storage object already absent in $bucketName: $singlePath")
+                singleAlreadyMissing = true
               } else {
                 Log.e(TAG, "Failed deleting $singlePath from $bucketName", singleError)
                 throw IllegalStateException(
@@ -139,6 +192,9 @@ internal object StorageCleanupHelper {
                 )
               }
             }
+            if (!singleAlreadyMissing) {
+              verifyObjectDeleted(bucketName, singlePath, bucket)
+            }
           }
         } else {
           Log.e(TAG, "Failed deleting ${chunk.size} file(s) from $bucketName", e)
@@ -146,6 +202,12 @@ internal object StorageCleanupHelper {
             "Failed to delete image files from cloud storage ($bucketName). Please try again.",
             e,
           )
+        }
+      }
+
+      if (!verifiedInFallback) {
+        for (path in chunk) {
+          verifyObjectDeleted(bucketName, path, bucket)
         }
       }
     }
@@ -184,35 +246,48 @@ internal object StorageCleanupHelper {
     return normalizeStoragePaths(directPaths + multiPagePaths, QUESTION_PAPERS_BUCKET)
   }
 
-  suspend fun collectStudentPaperPathsForClasses(
+  suspend fun collectClassCleanupTarget(
     classIds: List<String>,
     teacherId: String,
-  ): List<String> {
+  ): ClassCleanupTarget = coroutineScope {
     val validClassIds = classIds.filter { it.isNotBlank() }.distinct()
-    if (validClassIds.isEmpty()) return emptyList()
+    if (validClassIds.isEmpty()) {
+      return@coroutineScope ClassCleanupTarget(
+        studentIds = emptyList(),
+        paperIds = emptyList(),
+        studentPaperPaths = emptyList(),
+      )
+    }
 
-    val papersInClasses = SupabaseClientProvider.client.postgrest["student_papers"]
-      .select(Columns.list("id")) {
-        filter {
-          isIn("class_id", validClassIds)
-          eq("teacher_id", teacherId)
+    val papersInClassesDeferred = async {
+      SupabaseClientProvider.client.postgrest["student_papers"]
+        .select(Columns.list("id")) {
+          filter {
+            isIn("class_id", validClassIds)
+            eq("teacher_id", teacherId)
+          }
         }
-      }
-      .decodeList<IdRow>()
-      .mapNotNull { it.id }
-      .filter { it.isNotBlank() }
+        .decodeList<IdRow>()
+        .mapNotNull { it.id }
+        .filter { it.isNotBlank() }
+    }
 
-    val studentIds = SupabaseClientProvider.client.postgrest["students"]
-      .select(Columns.list("id")) {
-        filter {
-          isIn("class_id", validClassIds)
-          eq("teacher_id", teacherId)
+    val studentIdsDeferred = async {
+      SupabaseClientProvider.client.postgrest["students"]
+        .select(Columns.list("id")) {
+          filter {
+            isIn("class_id", validClassIds)
+            eq("teacher_id", teacherId)
+          }
         }
-      }
-      .decodeList<IdRow>()
-      .mapNotNull { it.id }
-      .filter { it.isNotBlank() }
-      .distinct()
+        .decodeList<IdRow>()
+        .mapNotNull { it.id }
+        .filter { it.isNotBlank() }
+        .distinct()
+    }
+
+    val papersInClasses = papersInClassesDeferred.await()
+    val studentIds = studentIdsDeferred.await()
 
     val papersByStudents = if (studentIds.isNotEmpty()) {
       SupabaseClientProvider.client.postgrest["student_papers"]
@@ -231,64 +306,92 @@ internal object StorageCleanupHelper {
 
     val paperIds = (papersInClasses + papersByStudents).distinct()
 
-    val pathsByPaper = if (paperIds.isNotEmpty()) {
-      SupabaseClientProvider.client.postgrest["student_paper_pages"]
-        .select(Columns.list("storage_path")) {
-          filter {
-            isIn("paper_id", paperIds)
-            eq("teacher_id", teacherId)
+    val pathsByPaperDeferred = async {
+      if (paperIds.isNotEmpty()) {
+        SupabaseClientProvider.client.postgrest["student_paper_pages"]
+          .select(Columns.list("storage_path")) {
+            filter {
+              isIn("paper_id", paperIds)
+              eq("teacher_id", teacherId)
+            }
           }
-        }
-        .decodeList<StoragePathRow>()
-        .mapNotNull { it.storagePath }
-    } else {
-      emptyList()
+          .decodeList<StoragePathRow>()
+          .mapNotNull { it.storagePath }
+      } else {
+        emptyList()
+      }
     }
 
-    val pathsByStudent = if (studentIds.isNotEmpty()) {
-      SupabaseClientProvider.client.postgrest["student_paper_pages"]
-        .select(Columns.list("storage_path")) {
-          filter {
-            isIn("student_id", studentIds)
-            eq("teacher_id", teacherId)
+    val pathsByStudentDeferred = async {
+      if (studentIds.isNotEmpty()) {
+        SupabaseClientProvider.client.postgrest["student_paper_pages"]
+          .select(Columns.list("storage_path")) {
+            filter {
+              isIn("student_id", studentIds)
+              eq("teacher_id", teacherId)
+            }
           }
-        }
-        .decodeList<StoragePathRow>()
-        .mapNotNull { it.storagePath }
-    } else {
-      emptyList()
+          .decodeList<StoragePathRow>()
+          .mapNotNull { it.storagePath }
+      } else {
+        emptyList()
+      }
     }
 
-    return normalizeStoragePaths(pathsByPaper + pathsByStudent, STUDENT_PAPERS_BUCKET)
+    val pathsByPaper = pathsByPaperDeferred.await()
+    val pathsByStudent = pathsByStudentDeferred.await()
+
+    ClassCleanupTarget(
+      studentIds = studentIds,
+      paperIds = paperIds,
+      studentPaperPaths = normalizeStoragePaths(pathsByPaper + pathsByStudent, STUDENT_PAPERS_BUCKET),
+    )
   }
 
-  suspend fun collectStudentPaperPathsForStudent(
+  suspend fun collectStudentPaperPathsForClasses(
+    classIds: List<String>,
+    teacherId: String,
+  ): List<String> = collectClassCleanupTarget(classIds, teacherId).studentPaperPaths
+
+  suspend fun collectStudentCleanupTarget(
     studentId: String,
     teacherId: String,
-  ): List<String> {
-    if (studentId.isBlank()) return emptyList()
+  ): StudentCleanupTarget = coroutineScope {
+    if (studentId.isBlank()) {
+      return@coroutineScope StudentCleanupTarget(
+        paperIds = emptyList(),
+        storagePaths = emptyList(),
+      )
+    }
 
-    val directPagePaths = SupabaseClientProvider.client.postgrest["student_paper_pages"]
-      .select(Columns.list("storage_path")) {
-        filter {
-          eq("student_id", studentId)
-          eq("teacher_id", teacherId)
+    val directPagePathsDeferred = async {
+      SupabaseClientProvider.client.postgrest["student_paper_pages"]
+        .select(Columns.list("storage_path")) {
+          filter {
+            eq("student_id", studentId)
+            eq("teacher_id", teacherId)
+          }
         }
-      }
-      .decodeList<StoragePathRow>()
-      .mapNotNull { it.storagePath }
+        .decodeList<StoragePathRow>()
+        .mapNotNull { it.storagePath }
+    }
 
-    val paperIds = SupabaseClientProvider.client.postgrest["student_papers"]
-      .select(Columns.list("id")) {
-        filter {
-          eq("student_id", studentId)
-          eq("teacher_id", teacherId)
+    val paperIdsDeferred = async {
+      SupabaseClientProvider.client.postgrest["student_papers"]
+        .select(Columns.list("id")) {
+          filter {
+            eq("student_id", studentId)
+            eq("teacher_id", teacherId)
+          }
         }
-      }
-      .decodeList<IdRow>()
-      .mapNotNull { it.id }
-      .filter { it.isNotBlank() }
-      .distinct()
+        .decodeList<IdRow>()
+        .mapNotNull { it.id }
+        .filter { it.isNotBlank() }
+        .distinct()
+    }
+
+    val directPagePaths = directPagePathsDeferred.await()
+    val paperIds = paperIdsDeferred.await()
 
     val paperPagePaths = if (paperIds.isNotEmpty()) {
       SupabaseClientProvider.client.postgrest["student_paper_pages"]
@@ -304,8 +407,16 @@ internal object StorageCleanupHelper {
       emptyList()
     }
 
-    return normalizeStoragePaths(directPagePaths + paperPagePaths, STUDENT_PAPERS_BUCKET)
+    StudentCleanupTarget(
+      paperIds = paperIds,
+      storagePaths = normalizeStoragePaths(directPagePaths + paperPagePaths, STUDENT_PAPERS_BUCKET),
+    )
   }
+
+  suspend fun collectStudentPaperPathsForStudent(
+    studentId: String,
+    teacherId: String,
+  ): List<String> = collectStudentCleanupTarget(studentId, teacherId).storagePaths
 
   suspend fun collectStudentPaperPathsForPaper(
     paperId: String,
@@ -406,21 +517,25 @@ internal object StorageCleanupHelper {
   suspend fun deleteStudentChildRecords(
     studentIds: List<String>,
     teacherId: String,
+    precollectedPaperIds: List<String>? = null,
   ) {
     val validStudentIds = studentIds.filter { it.isNotBlank() }.distinct()
     if (validStudentIds.isEmpty()) return
 
-    val paperIds = SupabaseClientProvider.client.postgrest["student_papers"]
-      .select(Columns.list("id")) {
-        filter {
-          isIn("student_id", validStudentIds)
-          eq("teacher_id", teacherId)
+    val paperIds = precollectedPaperIds
+      ?.filter { it.isNotBlank() }
+      ?.distinct()
+      ?: SupabaseClientProvider.client.postgrest["student_papers"]
+        .select(Columns.list("id")) {
+          filter {
+            isIn("student_id", validStudentIds)
+            eq("teacher_id", teacherId)
+          }
         }
-      }
-      .decodeList<IdRow>()
-      .mapNotNull { it.id }
-      .filter { it.isNotBlank() }
-      .distinct()
+        .decodeList<IdRow>()
+        .mapNotNull { it.id }
+        .filter { it.isNotBlank() }
+        .distinct()
 
     if (paperIds.isNotEmpty()) {
       deletePaperChildRecords(paperIds, teacherId)
@@ -446,49 +561,60 @@ internal object StorageCleanupHelper {
   suspend fun deleteClassChildRecords(
     classIds: List<String>,
     teacherId: String,
+    precollectedStudentIds: List<String>? = null,
+    precollectedPaperIds: List<String>? = null,
   ) {
     val validClassIds = classIds.filter { it.isNotBlank() }.distinct()
     if (validClassIds.isEmpty()) return
 
-    val studentIds = SupabaseClientProvider.client.postgrest["students"]
-      .select(Columns.list("id")) {
-        filter {
-          isIn("class_id", validClassIds)
-          eq("teacher_id", teacherId)
-        }
-      }
-      .decodeList<IdRow>()
-      .mapNotNull { it.id }
-      .filter { it.isNotBlank() }
-      .distinct()
-
-    val papersInClasses = SupabaseClientProvider.client.postgrest["student_papers"]
-      .select(Columns.list("id")) {
-        filter {
-          isIn("class_id", validClassIds)
-          eq("teacher_id", teacherId)
-        }
-      }
-      .decodeList<IdRow>()
-      .mapNotNull { it.id }
-      .filter { it.isNotBlank() }
-
-    val papersByStudents = if (studentIds.isNotEmpty()) {
-      SupabaseClientProvider.client.postgrest["student_papers"]
+    val studentIds = precollectedStudentIds
+      ?.filter { it.isNotBlank() }
+      ?.distinct()
+      ?: SupabaseClientProvider.client.postgrest["students"]
         .select(Columns.list("id")) {
           filter {
-            isIn("student_id", studentIds)
+            isIn("class_id", validClassIds)
             eq("teacher_id", teacherId)
           }
         }
         .decodeList<IdRow>()
         .mapNotNull { it.id }
         .filter { it.isNotBlank() }
-    } else {
-      emptyList()
-    }
+        .distinct()
 
-    val paperIds = (papersInClasses + papersByStudents).distinct()
+    val paperIds = precollectedPaperIds
+      ?.filter { it.isNotBlank() }
+      ?.distinct()
+      ?: run {
+        val papersInClasses = SupabaseClientProvider.client.postgrest["student_papers"]
+          .select(Columns.list("id")) {
+            filter {
+              isIn("class_id", validClassIds)
+              eq("teacher_id", teacherId)
+            }
+          }
+          .decodeList<IdRow>()
+          .mapNotNull { it.id }
+          .filter { it.isNotBlank() }
+
+        val papersByStudents = if (studentIds.isNotEmpty()) {
+          SupabaseClientProvider.client.postgrest["student_papers"]
+            .select(Columns.list("id")) {
+              filter {
+                isIn("student_id", studentIds)
+                eq("teacher_id", teacherId)
+              }
+            }
+            .decodeList<IdRow>()
+            .mapNotNull { it.id }
+            .filter { it.isNotBlank() }
+        } else {
+          emptyList()
+        }
+
+        (papersInClasses + papersByStudents).distinct()
+      }
+
     if (paperIds.isNotEmpty()) {
       deletePaperChildRecords(paperIds, teacherId)
     }
@@ -611,6 +737,8 @@ class SupabasePaperRepository(
         }
 
         Result.success(populatedPapers)
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching papers for student $studentId", e)
         Result.failure(e)
@@ -993,6 +1121,8 @@ class SupabasePaperRepository(
         .createSignedUrl(path = storagePath, expiresIn = expiresInSeconds.seconds)
 
       Result.success(signedUrl)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error generating signed URL for $storagePath", e)
       Result.failure(e)
@@ -1003,42 +1133,112 @@ class SupabasePaperRepository(
    * Prepares high-fidelity image bytes preserving handwriting clarity for future OCR.
    * Only scales down if the image exceeds 2560px to prevent OutOfMemory errors while keeping fine strokes sharp.
    */
-  private fun readHighFidelityImageBytes(context: Context, uri: Uri): ByteArray? {
-    return try {
-      val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-      context.contentResolver.openInputStream(uri)?.use { stream ->
-        BitmapFactory.decodeStream(stream, null, options)
+  private fun readHighFidelityImageBytes(context: Context, uri: Uri): ByteArray? =
+    readHighFidelityImageBytesInternal(context, uri)
+}
+
+internal fun readHighFidelityImageBytesInternal(context: Context, uri: Uri): ByteArray? {
+  return try {
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.contentResolver.openInputStream(uri)?.use { stream ->
+      BitmapFactory.decodeStream(stream, null, options)
+    }
+
+    val maxDimension = 2560
+    val srcWidth = options.outWidth
+    val srcHeight = options.outHeight
+    if (srcWidth <= 0 || srcHeight <= 0) {
+      return null
+    }
+
+    var inSampleSize = 1
+    if (srcWidth > maxDimension || srcHeight > maxDimension) {
+      val halfHeight = srcHeight / 2
+      val halfWidth = srcWidth / 2
+      while ((halfHeight / inSampleSize) >= maxDimension && (halfWidth / inSampleSize) >= maxDimension) {
+        inSampleSize *= 2
       }
+    }
 
-      val maxDimension = 2560
-      val srcWidth = options.outWidth
-      val srcHeight = options.outHeight
+    val decodeOptions = BitmapFactory.Options().apply {
+      this.inSampleSize = inSampleSize
+      inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
 
-      var inSampleSize = 1
-      if (srcWidth > maxDimension || srcHeight > maxDimension) {
-        val halfHeight = srcHeight / 2
-        val halfWidth = srcWidth / 2
-        while ((halfHeight / inSampleSize) >= maxDimension && (halfWidth / inSampleSize) >= maxDimension) {
-          inSampleSize *= 2
-        }
-      }
+    val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+      BitmapFactory.decodeStream(stream, null, decodeOptions)
+    } ?: return null
 
-      val decodeOptions = BitmapFactory.Options().apply {
-        this.inSampleSize = inSampleSize
-        inPreferredConfig = Bitmap.Config.ARGB_8888
-      }
-
-      val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-        BitmapFactory.decodeStream(stream, null, decodeOptions)
-      } ?: return null
-
+    try {
       val outputStream = ByteArrayOutputStream()
       // Quality 92 preserves handwriting edges and pen stroke clarity without aggressive loss
       bitmap.compress(Bitmap.CompressFormat.JPEG, 92, outputStream)
       outputStream.toByteArray()
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed reading image bytes from Uri: $uri", e)
-      null
+    } finally {
+      bitmap.recycle()
     }
+  } catch (e: Exception) {
+    Log.e("PaperRepository", "Failed reading image bytes from Uri: $uri", e)
+    null
   }
 }
+
+/**
+ * Safely deletes an app-owned temporary camera capture file located inside the app's cache directory.
+ * Never deletes gallery/media URIs or files outside the app's cache directory.
+ */
+internal fun deleteAppOwnedTempCameraFile(
+  context: Context?,
+  uri: Uri?,
+  fallbackCacheDir: File? = null,
+): Boolean {
+  if (uri == null) return false
+  return try {
+    val baseCacheDir = context?.cacheDir
+      ?: fallbackCacheDir
+      ?: System.getProperty("java.io.tmpdir")?.let(::File)
+      ?: return false
+    val cacheRoot = baseCacheDir.canonicalFile
+
+    val candidateFile: File? = when (uri.scheme) {
+      "file" -> uri.path?.let(::File)
+      "content" -> {
+        val authority = uri.authority.orEmpty()
+        val isAppFileProvider = if (context != null) {
+          authority == "${context.packageName}.fileprovider"
+        } else {
+          authority.endsWith(".fileprovider")
+        }
+        if (isAppFileProvider) {
+          val rawPath = uri.path.orEmpty().removePrefix("/")
+          val relativePath = when {
+            rawPath.startsWith("camera_photos/") -> rawPath.removePrefix("camera_photos/")
+            else -> rawPath
+          }
+          if (relativePath.isNotBlank()) File(cacheRoot, relativePath) else null
+        } else {
+          null
+        }
+      }
+      else -> null
+    }
+
+    if (candidateFile == null) return false
+    val canonicalTarget = candidateFile.canonicalFile
+    val isInsideCacheDir = canonicalTarget.path.startsWith(cacheRoot.path + File.separator)
+    val fileName = canonicalTarget.name
+    val isAppTempCameraFile =
+      fileName.startsWith("answer_page_") ||
+        fileName.startsWith("student_list_") ||
+        fileName.startsWith("qp_capture_")
+
+    if (isInsideCacheDir && isAppTempCameraFile && canonicalTarget.exists() && canonicalTarget.isFile) {
+      canonicalTarget.delete()
+    } else {
+      false
+    }
+  } catch (_: Exception) {
+    false
+  }
+}
+

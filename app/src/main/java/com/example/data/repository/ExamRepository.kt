@@ -8,7 +8,10 @@ import com.example.data.remote.SupabaseClientProvider
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 interface ExamRepository {
@@ -44,6 +47,8 @@ class SupabaseExamRepository(
         .decodeList<Exam>()
 
       Result.success(exams)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error fetching exams", e)
       Result.failure(e)
@@ -67,6 +72,8 @@ class SupabaseExamRepository(
         .decodeSingleOrNull<Exam>()
 
       Result.success(exam)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Error fetching exam with id: $id", e)
       Result.failure(e)
@@ -148,30 +155,39 @@ class SupabaseExamRepository(
       if (classRows.isNotEmpty()) {
         val classIds = classRows.mapNotNull { it.id }.filter { it.isNotBlank() }
 
-        // 3. Collect and delete all student answer-sheet page files across all classes in this exam FIRST
-        val studentPaperPaths = StorageCleanupHelper.collectStudentPaperPathsForClasses(
-          classIds = classIds,
-          teacherId = teacherId,
-        )
+        // 3. Collect all student answer-sheet page paths/IDs and class question-paper paths concurrently BEFORE deletion
+        val (cleanupTarget, questionPaperPaths) = coroutineScope {
+          val studentTargetDeferred = async {
+            StorageCleanupHelper.collectClassCleanupTarget(
+              classIds = classIds,
+              teacherId = teacherId,
+            )
+          }
+          val questionPathsDeferred = async {
+            StorageCleanupHelper.collectQuestionPaperPathsForClasses(
+              classRooms = classRows,
+              teacherId = teacherId,
+            )
+          }
+          studentTargetDeferred.await() to questionPathsDeferred.await()
+        }
+
+        // 4. Delete student answer-sheet page files and class question-paper files from Storage FIRST
         StorageCleanupHelper.deleteFromBucket(
           bucketName = StorageCleanupHelper.STUDENT_PAPERS_BUCKET,
-          rawPaths = studentPaperPaths,
-        )
-
-        // 4. Collect and delete all class question-paper files across all classes in this exam FIRST
-        val questionPaperPaths = StorageCleanupHelper.collectQuestionPaperPathsForClasses(
-          classRooms = classRows,
-          teacherId = teacherId,
+          rawPaths = cleanupTarget.studentPaperPaths,
         )
         StorageCleanupHelper.deleteFromBucket(
           bucketName = StorageCleanupHelper.QUESTION_PAPERS_BUCKET,
           rawPaths = questionPaperPaths,
         )
 
-        // 5. Delete associated child records and classes belonging to this exam
+        // 5. Delete associated child records (reusing precollected studentIds & paperIds) and classes belonging to this exam
         StorageCleanupHelper.deleteClassChildRecords(
           classIds = classIds,
           teacherId = teacherId,
+          precollectedStudentIds = cleanupTarget.studentIds,
+          precollectedPaperIds = cleanupTarget.paperIds,
         )
 
         if (classIds.isNotEmpty()) {

@@ -1207,15 +1207,28 @@ private fun ResultQuestionCard(
   }
 }
 
+private val RESULT_PROVISIONAL_REF_ANSWER_COLON_REGEX =
+  Regex("\\[Provisional Reference Answer\\]:\\s*", RegexOption.IGNORE_CASE)
+private val RESULT_PROVISIONAL_CRITERIA_COLON_REGEX =
+  Regex("\\[Provisional Criteria\\]:\\s*", RegexOption.IGNORE_CASE)
+private val RESULT_PROVISIONAL_REF_ANSWER_TAG_REGEX =
+  Regex("\\[provisional reference answer\\]", RegexOption.IGNORE_CASE)
+private val RESULT_PROVISIONAL_CRITERIA_TAG_REGEX =
+  Regex("\\[provisional criteria\\]", RegexOption.IGNORE_CASE)
+private val RESULT_PROVISIONAL_RUBRIC_COLON_REGEX =
+  Regex("\\[Provisional Rubric\\]:\\s*", RegexOption.IGNORE_CASE)
+private val RESULT_PROVISIONAL_RUBRIC_TAG_REGEX =
+  Regex("\\[provisional rubric\\]", RegexOption.IGNORE_CASE)
+
 private fun cleanProvisionalText(text: String?): String {
   if (text.isNullOrBlank()) return ""
   return text
-    .replace(Regex("\\[Provisional Reference Answer\\]:\\s*", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[Provisional Criteria\\]:\\s*", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[provisional reference answer\\]", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[provisional criteria\\]", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[Provisional Rubric\\]:\\s*", RegexOption.IGNORE_CASE), "")
-    .replace(Regex("\\[provisional rubric\\]", RegexOption.IGNORE_CASE), "")
+    .replace(RESULT_PROVISIONAL_REF_ANSWER_COLON_REGEX, "")
+    .replace(RESULT_PROVISIONAL_CRITERIA_COLON_REGEX, "")
+    .replace(RESULT_PROVISIONAL_REF_ANSWER_TAG_REGEX, "")
+    .replace(RESULT_PROVISIONAL_CRITERIA_TAG_REGEX, "")
+    .replace(RESULT_PROVISIONAL_RUBRIC_COLON_REGEX, "")
+    .replace(RESULT_PROVISIONAL_RUBRIC_TAG_REGEX, "")
     .trim()
 }
 

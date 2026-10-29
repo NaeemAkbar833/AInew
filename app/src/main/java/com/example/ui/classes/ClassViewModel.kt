@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.ClassRoom
 import com.example.data.model.ClassTiming
 import com.example.data.repository.ClassRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +17,7 @@ data class ClassesUiState(
   val classes: List<ClassRoom> = emptyList(),
   val isLoading: Boolean = false,
   val errorMessage: String? = null,
+  val activeExamId: String? = null,
   val isAddClassDialogOpen: Boolean = false,
   val isSaving: Boolean = false,
   val saveErrorMessage: String? = null,
@@ -30,29 +33,112 @@ class ClassViewModel(
   private val _uiState = MutableStateFlow(ClassesUiState())
   val uiState: StateFlow<ClassesUiState> = _uiState.asStateFlow()
 
-  fun loadClasses(examId: String) {
+  private var loadJob: Job? = null
+  private var activeExamId: String? = null
+  private var requestGeneration: Long = 0L
+
+  /**
+   * Loads classes for the given examId.
+   * - In-flight duplicate requests for the same exam are deduplicated unless forceRefresh is true.
+   * - Switching exams immediately cancels the obsolete in-flight request and resets the displayed classes.
+   * - Responses from stale or cancelled requests are prevented from overwriting active state via generation tracking.
+   * - CancellationException is preserved and rethrown.
+   * - Failures cleanly end the loading state without leaving the screen hanging.
+   */
+  fun loadClasses(examId: String, forceRefresh: Boolean = false) {
     if (examId.isBlank()) return
-    viewModelScope.launch {
-      _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-      val result = classRepository.getClassesByExamId(examId)
-      result.fold(
-        onSuccess = { list ->
-          _uiState.update {
-            it.copy(
-              classes = list,
-              isLoading = false,
-              errorMessage = null,
-            )
+
+    if (loadJob?.isActive == true) {
+      if (examId == activeExamId && !forceRefresh) {
+        return
+      }
+      loadJob?.cancel()
+      loadJob = null
+    }
+
+    val isSwitchingExam = activeExamId != null && activeExamId != examId
+    activeExamId = examId
+    val myGeneration = ++requestGeneration
+
+    loadJob = viewModelScope.launch {
+      _uiState.update {
+        it.copy(
+          classes = if (isSwitchingExam) emptyList() else it.classes,
+          isLoading = true,
+          errorMessage = null,
+          activeExamId = examId,
+        )
+      }
+      try {
+        val result = classRepository.getClassesByExamId(examId)
+
+        if (myGeneration != requestGeneration) {
+          return@launch
+        }
+
+        result.exceptionOrNull()?.let { ex ->
+          if (ex is CancellationException) throw ex
+        }
+
+        result.fold(
+          onSuccess = { list ->
+            if (myGeneration != requestGeneration) return@fold
+            _uiState.update {
+              it.copy(
+                classes = list,
+                isLoading = false,
+                errorMessage = null,
+                activeExamId = examId,
+              )
+            }
+          },
+          onFailure = { error ->
+            if (error is CancellationException) throw error
+            if (myGeneration != requestGeneration) return@fold
+            _uiState.update {
+              it.copy(
+                isLoading = false,
+                errorMessage = error.localizedMessage ?: "Failed to load classes.",
+                activeExamId = examId,
+              )
+            }
           }
-        },
-        onFailure = { error ->
+        )
+      } catch (e: CancellationException) {
+        if (myGeneration == requestGeneration) {
+          _uiState.update { it.copy(isLoading = false) }
+        }
+        throw e
+      } catch (e: Exception) {
+        if (myGeneration == requestGeneration) {
           _uiState.update {
             it.copy(
               isLoading = false,
-              errorMessage = error.localizedMessage ?: "Failed to load classes.",
+              errorMessage = e.localizedMessage ?: "Failed to load classes.",
             )
           }
         }
+      } finally {
+        if (myGeneration == requestGeneration) {
+          _uiState.update { state ->
+            if (state.isLoading) state.copy(isLoading = false) else state
+          }
+        }
+      }
+    }
+  }
+
+  fun clearClasses() {
+    loadJob?.cancel()
+    loadJob = null
+    activeExamId = null
+    requestGeneration++
+    _uiState.update {
+      it.copy(
+        classes = emptyList(),
+        isLoading = false,
+        errorMessage = null,
+        activeExamId = null,
       )
     }
   }

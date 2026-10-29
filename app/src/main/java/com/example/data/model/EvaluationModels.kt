@@ -319,38 +319,38 @@ private data class QuestionSortKey(
   val normalized: String,
 )
 
+private val SORT_MARKDOWN_WRAPPER_REGEX = Regex("^[#*_`~\\s]+|[#*_`~\\s]+$")
+private val SORT_QUESTION_PREFIX_REGEX = Regex(
+  "^(?:(?:(?:ans(?:wer)?|sol(?:ution)?)[.:\\-\\s]*(?:(?:to|for|of)\\s+)?)?(?:question|ques|que|q\\.?\\s*n\\.?|q)(?:\\s*\\.?\\s*(?:no|num|number)\\.?)?|(?:ans(?:wer)?|sol(?:ution)?)(?:\\s*\\.?\\s*(?:no|num|number)\\.?)?|(?:no|num|number)\\.?)\\s*[.:\\-#)\\]–—\\s]*",
+  RegexOption.IGNORE_CASE
+)
+private val SORT_PUNCTUATION_WRAPPER_REGEX = Regex("^[#*_`~.:\\-–—\\s]+|[#*_`~.:\\-–—\\s]+$")
+private val SORT_TRAILING_PAREN_REGEX = Regex("[)\\s]+$")
+private val SORT_TRAILING_BRACKET_REGEX = Regex("[\\]\\s]+$")
+private val SORT_SPACED_SUBPART_PAREN_REGEX = Regex("\\s*\\(\\s*([a-zA-Z0-9]+)\\s*\\)")
+private val SORT_LEADING_DIGITS_REGEX = Regex("^(\\d+)(.*)$")
+private val SORT_SUBPART_TOKEN_REGEX = Regex("\\(([A-Z0-9]+)\\)|\\.(\\d+|[A-Z]+)|([A-Z]+|\\d+)")
+
 fun normalizeQuestionNumberForSort(raw: String?): String {
   if (raw.isNullOrBlank()) return ""
   var s = raw.trim()
-  s = s.replace(Regex("^[#*_`~\\s]+|[#*_`~\\s]+$"), "")
-  s = s.replace(
-    Regex(
-      "^(?:(?:(?:ans(?:wer)?|sol(?:ution)?)[.:\\-\\s]*(?:(?:to|for|of)\\s+)?)?(?:question|ques|que|q\\.?\\s*n\\.?|q)(?:\\s*\\.?\\s*(?:no|num|number)\\.?)?|(?:ans(?:wer)?|sol(?:ution)?)(?:\\s*\\.?\\s*(?:no|num|number)\\.?)?|(?:no|num|number)\\.?)\\s*[.:\\-#)\\]–—\\s]*",
-      RegexOption.IGNORE_CASE
-    ),
-    ""
-  )
-  s = s.replace(Regex("^[#*_`~.:\\-–—\\s]+|[#*_`~.:\\-–—\\s]+$"), "")
+  s = s.replace(SORT_MARKDOWN_WRAPPER_REGEX, "")
+  s = s.replace(SORT_QUESTION_PREFIX_REGEX, "")
+  s = s.replace(SORT_PUNCTUATION_WRAPPER_REGEX, "")
   while (
     (s.startsWith("(") && s.endsWith(")") && !s.substring(1, s.length - 1).contains(")")) ||
     (s.startsWith("[") && s.endsWith("]") && !s.substring(1, s.length - 1).contains("]"))
   ) {
     s = s.substring(1, s.length - 1).trim()
   }
-  s = s.replace(
-    Regex(
-      "^(?:(?:(?:ans(?:wer)?|sol(?:ution)?)[.:\\-\\s]*(?:(?:to|for|of)\\s+)?)?(?:question|ques|que|q\\.?\\s*n\\.?|q)(?:\\s*\\.?\\s*(?:no|num|number)\\.?)?|(?:ans(?:wer)?|sol(?:ution)?)(?:\\s*\\.?\\s*(?:no|num|number)\\.?)?|(?:no|num|number)\\.?)\\s*[.:\\-#)\\]–—\\s]*",
-      RegexOption.IGNORE_CASE
-    ),
-    ""
-  )
+  s = s.replace(SORT_QUESTION_PREFIX_REGEX, "")
   if (s.endsWith(")") && !s.contains("(")) {
-    s = s.replace(Regex("[)\\s]+$"), "")
+    s = s.replace(SORT_TRAILING_PAREN_REGEX, "")
   }
   if (s.endsWith("]") && !s.contains("[")) {
-    s = s.replace(Regex("[\\]\\s]+$"), "")
+    s = s.replace(SORT_TRAILING_BRACKET_REGEX, "")
   }
-  s = s.replace(Regex("\\s*\\(\\s*([a-zA-Z0-9]+)\\s*\\)"), "($1)")
+  s = s.replace(SORT_SPACED_SUBPART_PAREN_REGEX, "($1)")
   return s.trim().uppercase()
 }
 
@@ -365,14 +365,13 @@ private fun parseQuestionSortKey(raw: String?): QuestionSortKey {
     )
   }
 
-  val leadingDigits = Regex("^(\\d+)(.*)$").matchEntire(norm)
+  val leadingDigits = SORT_LEADING_DIGITS_REGEX.matchEntire(norm)
   if (leadingDigits != null) {
     val primary = leadingDigits.groupValues[1].toIntOrNull() ?: Int.MAX_VALUE
     val rest = leadingDigits.groupValues[2].trim()
     val subparts = mutableListOf<String>()
     if (rest.isNotEmpty()) {
-      val tokenRegex = Regex("\\(([A-Z0-9]+)\\)|\\.(\\d+|[A-Z]+)|([A-Z]+|\\d+)")
-      for (m in tokenRegex.findAll(rest)) {
+      for (m in SORT_SUBPART_TOKEN_REGEX.findAll(rest)) {
         val tok = (m.groupValues[1].ifEmpty { m.groupValues[2].ifEmpty { m.groupValues[3] } })
           .trim()
           .uppercase()

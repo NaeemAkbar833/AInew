@@ -89,10 +89,21 @@ fun HomeScreen(
   var showSignOutDialog by remember { mutableStateOf(false) }
   val scrollState = rememberScrollState()
 
+  LaunchedEffect(Unit) {
+    viewModel.loadUserData()
+  }
+
   LaunchedEffect(uiState.placeholderMessage) {
     uiState.placeholderMessage?.let { message ->
       snackbarHostState.showSnackbar(message)
       viewModel.dismissPlaceholderMessage()
+    }
+  }
+
+  LaunchedEffect(uiState.errorMessage) {
+    uiState.errorMessage?.let { errorMsg ->
+      snackbarHostState.showSnackbar(errorMsg)
+      viewModel.dismissErrorMessage()
     }
   }
 

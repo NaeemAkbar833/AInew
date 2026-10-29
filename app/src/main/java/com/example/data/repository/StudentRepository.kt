@@ -7,6 +7,7 @@ import com.example.data.remote.SupabaseClientProvider
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -31,6 +32,10 @@ interface StudentRepository {
 
 class SupabaseStudentRepository(
   private val authRepository: AuthRepository,
+  private val httpClient: okhttp3.OkHttpClient = SupabaseClientProvider.baseOkHttpClient.newBuilder()
+    .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+    .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+    .build(),
 ) : StudentRepository {
   private val TAG = "StudentRepository"
 
@@ -57,6 +62,8 @@ class SupabaseStudentRepository(
           .decodeList<Student>()
 
         Result.success(students)
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching students for class $classId", e)
         Result.failure(e)
@@ -85,6 +92,8 @@ class SupabaseStudentRepository(
           .decodeSingleOrNull<Student>()
 
         Result.success(student)
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching student with id $studentId", e)
         Result.failure(e)
@@ -163,8 +172,8 @@ class SupabaseStudentRepository(
           )
         }
 
-        // 2. Collect all answer-sheet page paths for this student BEFORE database deletion
-        val studentPaperPaths = StorageCleanupHelper.collectStudentPaperPathsForStudent(
+        // 2. Collect all answer-sheet page paths and paper IDs for this student BEFORE database deletion
+        val cleanupTarget = StorageCleanupHelper.collectStudentCleanupTarget(
           studentId = studentId,
           teacherId = teacherId,
         )
@@ -172,13 +181,14 @@ class SupabaseStudentRepository(
         // 3. Delete all uploaded page images from student-papers bucket FIRST
         StorageCleanupHelper.deleteFromBucket(
           bucketName = StorageCleanupHelper.STUDENT_PAPERS_BUCKET,
-          rawPaths = studentPaperPaths,
+          rawPaths = cleanupTarget.storagePaths,
         )
 
         // 4. Delete associated child records (evaluation questions, evaluations, pages, papers) and student record
         StorageCleanupHelper.deleteStudentChildRecords(
           studentIds = listOf(studentId),
           teacherId = teacherId,
+          precollectedPaperIds = cleanupTarget.paperIds,
         )
 
         val deletedRows = SupabaseClientProvider.client.postgrest["students"]
@@ -232,11 +242,6 @@ class SupabaseStudentRepository(
           .header("Authorization", "Bearer $accessToken")
           .header("apikey", anonKey)
           .header("Content-Type", "application/json")
-          .build()
-
-        val httpClient = okhttp3.OkHttpClient.Builder()
-          .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-          .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
           .build()
 
         val response = httpClient.newCall(httpRequest).execute()

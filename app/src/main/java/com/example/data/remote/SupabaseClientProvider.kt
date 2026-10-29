@@ -8,8 +8,24 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.storage.Storage
 
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
+
 object SupabaseClientProvider {
   private const val TAG = "SupabaseClientProvider"
+
+  /**
+   * Shared base OkHttpClient with shared connection pool, thread pool, and dispatcher.
+   * Specific callers (OCR, student list extraction, AI evaluation) derive from this
+   * using `.newBuilder()` to adjust timeouts without reallocating underlying pools.
+   */
+  val baseOkHttpClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+      .connectTimeout(30, TimeUnit.SECONDS)
+      .readTimeout(30, TimeUnit.SECONDS)
+      .writeTimeout(30, TimeUnit.SECONDS)
+      .build()
+  }
 
   val client: SupabaseClient by lazy {
     val url = BuildConfig.SUPABASE_URL.ifBlank { "https://placeholder.supabase.co" }

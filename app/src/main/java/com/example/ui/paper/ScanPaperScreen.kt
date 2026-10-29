@@ -100,6 +100,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.model.LocalScannedPage
+import com.example.data.repository.deleteAppOwnedTempCameraFile
 import com.example.ui.components.GradeScanProgressDialog
 import com.example.ui.theme.BackgroundLight
 import com.example.ui.theme.BorderGray
@@ -115,6 +116,7 @@ import com.example.ui.theme.StatusSuccessContainer
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
@@ -141,6 +143,7 @@ fun ScanPaperScreen(
   var isCameraSessionOpen by remember { mutableStateOf(false) }
 
   LaunchedEffect(studentId) {
+    viewModel.registerCacheDir(context.cacheDir)
     viewModel.loadStudentInfo(studentId)
   }
 
@@ -157,13 +160,25 @@ fun ScanPaperScreen(
     contract = ActivityResultContracts.TakePicture()
   ) { success ->
     val uri = pendingCameraUri
+    pendingCameraUri = null
     if (success && uri != null) {
       viewModel.addPage(uri)
+    } else if (uri != null) {
+      coroutineScope.launch(Dispatchers.IO) {
+        deleteAppOwnedTempCameraFile(context, uri)
+      }
     }
   }
 
   val launchFallbackCameraCapture = {
     try {
+      val previousPending = pendingCameraUri
+      if (previousPending != null) {
+        pendingCameraUri = null
+        coroutineScope.launch(Dispatchers.IO) {
+          deleteAppOwnedTempCameraFile(context, previousPending)
+        }
+      }
       val (_, uri) = createTempImageFileAndUri(context)
       pendingCameraUri = uri
       takePictureLauncher.launch(uri)
@@ -607,11 +622,13 @@ private fun MultiPageCameraSessionOverlay(
   val triggerCapture = {
     val activeCapture = imageCapture
     if (activeCapture != null && !isCapturingPhoto) {
+      var createdFile: File? = null
       try {
         isCapturingPhoto = true
         captureErrorText = null
         activeCapture.targetRotation = previewView.display?.rotation ?: AndroidSurface.ROTATION_0
         val (photoFile, photoUri) = createTempImageFileAndUri(context)
+        createdFile = photoFile
         val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
         activeCapture.takePicture(
           outputOptions,
@@ -624,12 +641,14 @@ private fun MultiPageCameraSessionOverlay(
 
             override fun onError(exception: ImageCaptureException) {
               isCapturingPhoto = false
+              runCatching { photoFile.delete() }
               captureErrorText = "Could not capture photo. Please try again."
             }
           },
         )
       } catch (e: Exception) {
         isCapturingPhoto = false
+        runCatching { createdFile?.delete() }
         captureErrorText = "Capture failed: ${e.localizedMessage ?: "Unknown error"}"
       }
     }

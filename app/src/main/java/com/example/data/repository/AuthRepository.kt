@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.data.remote.SupabaseClientProvider
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -72,6 +73,8 @@ class SupabaseAuthRepository : AuthRepository {
         SupabaseClientProvider.client.auth.signOut()
       }
       Result.success(Unit)
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Log.e(TAG, "Sign out failed", e)
       Result.failure(e)

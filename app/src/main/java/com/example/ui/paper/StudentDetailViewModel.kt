@@ -27,10 +27,13 @@ import com.example.data.repository.ClassRepository
 import com.example.data.repository.OcrRepository
 import com.example.data.repository.PaperRepository
 import com.example.data.repository.StudentRepository
+import com.example.data.repository.executeCancellable
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,6 +46,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 data class StudentDetailUiState(
@@ -79,77 +83,216 @@ class StudentDetailViewModel(
   private val paperRepository: PaperRepository,
   private val ocrRepository: OcrRepository? = null,
   private val approveEvaluationAction: (suspend (evaluationId: String, paperId: String) -> Result<Unit>)? = null,
-) : ViewModel() {
-
-  private val evaluationHttpClient = OkHttpClient.Builder()
+  private val evaluationHttpClient: OkHttpClient = SupabaseClientProvider.baseOkHttpClient.newBuilder()
     .connectTimeout(180, TimeUnit.SECONDS)
     .readTimeout(180, TimeUnit.SECONDS)
     .writeTimeout(180, TimeUnit.SECONDS)
-    .build()
+    .build(),
+  private val existingEvaluationDbFetcher: (suspend (paperId: String) -> Pair<EvaluationDbRecord, List<QuestionDbRecord>>?)? = null,
+  private val evaluationAccessTokenProvider: (() -> String?)? = null,
+  private val saveTeacherCorrectionsAction: (suspend (evaluationId: String, paperId: String) -> Result<AiEvaluationResponse>)? = null,
+) : ViewModel() {
 
   private val _uiState = MutableStateFlow(StudentDetailUiState())
   val uiState: StateFlow<StudentDetailUiState> = _uiState.asStateFlow()
 
   private var evaluationJob: Job? = null
+  private var evaluationGeneration: Long = 0L
+  private var loadGeneration: Long = 0L
+  private var loadJob: Job? = null
+  private var activeStudentId: String? = null
+  private var signedUrlGeneration: Long = 0L
+  private val inFlightSignedUrlTokens = mutableMapOf<String, Long>()
+  private val inFlightSignedUrlJobs = mutableMapOf<String, Job>()
+  private var ocrGeneration: Long = 0L
+  private val inFlightOcrTokens = mutableMapOf<String, Long>()
+  private val inFlightOcrJobs = mutableMapOf<String, Job>()
+  private val inFlightApprovalPaperIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
+  private val inFlightSavePaperIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
   fun loadStudentAndPapers(studentId: String) {
     if (studentId.isBlank()) return
-    viewModelScope.launch {
-      _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+    val myGeneration = ++loadGeneration
+    val isStudentSwitch = activeStudentId != null && activeStudentId != studentId
+    activeStudentId = studentId
+    if (isStudentSwitch) {
+      evaluationGeneration++
+      evaluationJob?.cancel()
+      evaluationJob = null
+    }
+    loadJob?.cancel()
+    loadJob = viewModelScope.launch {
+      _uiState.update { state ->
+        if (isStudentSwitch) {
+          state.copy(
+            student = null,
+            classRoom = null,
+            papers = emptyList(),
+            isLoading = true,
+            errorMessage = null,
+            isEvaluatingPaperId = null,
+            evaluatedPaperId = null,
+            evaluationResult = null,
+            evaluationResultJson = null,
+            evaluationError = null,
+            editedQuestions = null,
+            pendingReviewNavigationPaperId = null,
+            isApproving = false,
+            approvalSuccess = false,
+            approvalError = null,
+            isSavingCorrections = false,
+            saveCorrectionsSuccess = false,
+            saveCorrectionsError = null,
+          )
+        } else {
+          state.copy(isLoading = true, errorMessage = null)
+        }
+      }
+      try {
+        val knownClassId = if (!isStudentSwitch) {
+          _uiState.value.student
+            ?.takeIf { it.id == studentId }
+            ?.classId
+            ?.takeIf { it.isNotBlank() }
+        } else {
+          null
+        }
 
-      // 1. Fetch student info
-      val studentResult = studentRepository.getStudentById(studentId)
-      val student = studentResult.getOrNull()
-
-      // 2. Fetch class info
-      val classRoom = if (student != null) {
-        classRepository.getClassById(student.classId).getOrNull()
-      } else null
-
-      // 3. Fetch papers
-      val papersResult = paperRepository.getPapersByStudentId(studentId)
-      papersResult.fold(
-        onSuccess = { papersList ->
-          _uiState.update {
-            it.copy(
-              student = student ?: it.student,
-              classRoom = classRoom ?: it.classRoom,
-              papers = papersList,
-              isLoading = false,
-              errorMessage = null,
-            )
-          }
-
-          // Preload first page signed URLs for thumbnails
-          papersList.forEach { paper ->
-            paper.pages.firstOrNull()?.let { firstPage ->
-              loadSignedUrlForPage(firstPage.storagePath)
-            }
-          }
-        },
-        onFailure = { error ->
-          _uiState.update {
-            it.copy(
-              student = student ?: it.student,
-              classRoom = classRoom ?: it.classRoom,
-              isLoading = false,
-              errorMessage = error.localizedMessage ?: "Failed to load papers.",
-            )
+        // Fetch student (+ class) and papers concurrently
+        val speculativeClassDeferred = knownClassId?.let { cid ->
+          async {
+            val res = classRepository.getClassById(cid)
+            res.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            res.getOrNull()
           }
         }
-      )
+        val studentAndClassDeferred = async {
+          val studentResult = studentRepository.getStudentById(studentId)
+          studentResult.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+          val student = studentResult.getOrNull()
+          val classRoom = when {
+            student == null -> {
+              speculativeClassDeferred?.cancel()
+              null
+            }
+            knownClassId != null && student.classId == knownClassId -> {
+              speculativeClassDeferred?.await()
+            }
+            else -> {
+              speculativeClassDeferred?.cancel()
+              val classResult = classRepository.getClassById(student.classId)
+              classResult.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+              classResult.getOrNull()
+            }
+          }
+          student to classRoom
+        }
+        val papersDeferred = async {
+          paperRepository.getPapersByStudentId(studentId)
+        }
+
+        val (student, classRoom) = studentAndClassDeferred.await()
+        val papersResult = papersDeferred.await()
+
+        if (myGeneration != loadGeneration || activeStudentId != studentId) return@launch
+
+        papersResult.fold(
+          onSuccess = { rawPapersList ->
+            if (myGeneration != loadGeneration || activeStudentId != studentId) return@fold
+            val papersList = rawPapersList.filter { it.studentId.isBlank() || it.studentId == studentId }
+            val activePaths = papersList
+              .flatMap { paper -> paper.pages.map { it.storagePath } }
+              .toSet()
+            val obsoleteInFlightPaths = inFlightSignedUrlTokens.keys.filter { it !in activePaths }
+            obsoleteInFlightPaths.forEach { path ->
+              inFlightSignedUrlTokens.remove(path)
+              inFlightSignedUrlJobs.remove(path)?.cancel()
+            }
+
+            _uiState.update {
+              if (myGeneration != loadGeneration || activeStudentId != studentId) return@update it
+              it.copy(
+                student = student?.takeIf { s -> s.id == null || s.id == studentId } ?: it.student,
+                classRoom = classRoom ?: it.classRoom,
+                papers = papersList,
+                signedUrls = it.signedUrls.filterKeys { path -> path in activePaths },
+                isLoading = false,
+                errorMessage = null,
+              )
+            }
+
+            // Preload first page signed URLs for thumbnails, reusing cached or in-flight URLs
+            papersList
+              .mapNotNull { paper -> paper.pages.firstOrNull()?.storagePath }
+              .filter { it.isNotBlank() }
+              .distinct()
+              .forEach { storagePath ->
+                loadSignedUrlForPage(storagePath)
+              }
+          },
+          onFailure = { error ->
+            if (error is CancellationException) throw error
+            if (myGeneration != loadGeneration || activeStudentId != studentId) return@fold
+            _uiState.update {
+              if (myGeneration != loadGeneration || activeStudentId != studentId) return@update it
+              it.copy(
+                student = student?.takeIf { s -> s.id == null || s.id == studentId } ?: it.student,
+                classRoom = classRoom ?: it.classRoom,
+                isLoading = false,
+                errorMessage = error.localizedMessage ?: "Failed to load papers.",
+              )
+            }
+          }
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } finally {
+        if (myGeneration == loadGeneration) {
+          _uiState.update { state ->
+            if (state.isLoading) state.copy(isLoading = false) else state
+          }
+        }
+      }
     }
   }
 
   fun loadSignedUrlForPage(storagePath: String) {
+    if (storagePath.isBlank()) return
     if (_uiState.value.signedUrls.containsKey(storagePath)) return
-    viewModelScope.launch {
-      val result = paperRepository.getSignedPageUrl(storagePath)
-      result.onSuccess { url ->
-        _uiState.update {
-          it.copy(signedUrls = it.signedUrls + (storagePath to url))
+    if (inFlightSignedUrlTokens.containsKey(storagePath)) return
+    val requestToken = ++signedUrlGeneration
+    inFlightSignedUrlTokens[storagePath] = requestToken
+    val job = viewModelScope.launch {
+      try {
+        val result = paperRepository.getSignedPageUrl(storagePath)
+        result.fold(
+          onSuccess = { url ->
+            if (inFlightSignedUrlTokens[storagePath] == requestToken) {
+              _uiState.update { state ->
+                val isStillReferenced = state.papers.any { paper ->
+                  paper.pages.any { page -> page.storagePath == storagePath }
+                }
+                if (inFlightSignedUrlTokens[storagePath] == requestToken && isStillReferenced) {
+                  state.copy(signedUrls = state.signedUrls + (storagePath to url))
+                } else {
+                  state
+                }
+              }
+            }
+          },
+          onFailure = { error ->
+            if (error is CancellationException) throw error
+          }
+        )
+      } finally {
+        if (inFlightSignedUrlTokens[storagePath] == requestToken) {
+          inFlightSignedUrlTokens.remove(storagePath)
+          inFlightSignedUrlJobs.remove(storagePath)
         }
       }
+    }
+    if (inFlightSignedUrlTokens[storagePath] == requestToken) {
+      inFlightSignedUrlJobs[storagePath] = job
     }
   }
 
@@ -157,15 +300,31 @@ class StudentDetailViewModel(
     viewModelScope.launch {
       val paperId = paper.id
       if (!paperId.isNullOrBlank() && _uiState.value.isEvaluatingPaperId == paperId) {
+        evaluationGeneration++
         evaluationJob?.cancel()
         evaluationJob = null
+      }
+      paper.pages.mapNotNull { it.id }.forEach { pid ->
+        inFlightOcrTokens.remove(pid)
+        inFlightOcrJobs.remove(pid)?.cancel()
       }
       _uiState.update { it.copy(isDeletingPaper = true, deletePaperError = null) }
       val result = paperRepository.deletePaper(paper)
       result.fold(
         onSuccess = {
+          if (!paperId.isNullOrBlank() && _uiState.value.evaluatedPaperId == paperId) {
+            evaluationGeneration++
+          }
           val deletedPaths = paper.pages.map { it.storagePath }.toSet()
+          deletedPaths.forEach { path ->
+            inFlightSignedUrlTokens.remove(path)
+            inFlightSignedUrlJobs.remove(path)?.cancel()
+          }
           val deletedPageIds = paper.pages.mapNotNull { it.id }.toSet()
+          deletedPageIds.forEach { pid ->
+            inFlightOcrTokens.remove(pid)
+            inFlightOcrJobs.remove(pid)?.cancel()
+          }
           _uiState.update { state ->
             val shouldClearEvaluation = !paper.id.isNullOrBlank() && state.evaluatedPaperId == paper.id
             val shouldClearEvaluating = !paper.id.isNullOrBlank() && state.isEvaluatingPaperId == paper.id
@@ -196,6 +355,7 @@ class StudentDetailViewModel(
           onSuccess()
         },
         onFailure = { error ->
+          if (error is CancellationException) throw error
           _uiState.update {
             it.copy(
               isDeletingPaper = false,
@@ -210,13 +370,27 @@ class StudentDetailViewModel(
   fun deletePaperPage(page: com.example.data.model.StudentPaperPage, onSuccess: () -> Unit = {}) {
     viewModelScope.launch {
       if (page.paperId.isNotBlank() && _uiState.value.isEvaluatingPaperId == page.paperId) {
+        evaluationGeneration++
         evaluationJob?.cancel()
         evaluationJob = null
+      }
+      if (!page.id.isNullOrBlank()) {
+        inFlightOcrTokens.remove(page.id)
+        inFlightOcrJobs.remove(page.id)?.cancel()
       }
       _uiState.update { it.copy(isDeletingPaper = true, deletePaperError = null) }
       val result = paperRepository.deletePaperPage(page)
       result.fold(
         onSuccess = {
+          if (page.paperId.isNotBlank() && _uiState.value.evaluatedPaperId == page.paperId) {
+            evaluationGeneration++
+          }
+          inFlightSignedUrlTokens.remove(page.storagePath)
+          inFlightSignedUrlJobs.remove(page.storagePath)?.cancel()
+          if (!page.id.isNullOrBlank()) {
+            inFlightOcrTokens.remove(page.id)
+            inFlightOcrJobs.remove(page.id)?.cancel()
+          }
           _uiState.update { state ->
             val updatedPapers = state.papers.mapNotNull { p ->
               if (p.id != page.paperId) {
@@ -275,6 +449,7 @@ class StudentDetailViewModel(
           onSuccess()
         },
         onFailure = { error ->
+          if (error is CancellationException) throw error
           _uiState.update {
             it.copy(
               isDeletingPaper = false,
@@ -306,7 +481,11 @@ class StudentDetailViewModel(
       return
     }
 
-    viewModelScope.launch {
+    val requestToken = ++ocrGeneration
+    inFlightOcrTokens[pageId] = requestToken
+    inFlightOcrJobs.remove(pageId)?.cancel()
+
+    val job = viewModelScope.launch {
       _uiState.update {
         it.copy(
           ocrLoadingPageIds = it.ocrLoadingPageIds + pageId,
@@ -314,26 +493,62 @@ class StudentDetailViewModel(
         )
       }
 
-      val result = ocrRepository.processPageOcr(paperId = paperId, pageId = pageId)
-      result.fold(
-        onSuccess = { text ->
-          _uiState.update {
-            it.copy(
-              ocrLoadingPageIds = it.ocrLoadingPageIds - pageId,
-              ocrTextByPageId = it.ocrTextByPageId + (pageId to text),
-              feedbackMessage = "Handwriting transcribed successfully.",
-            )
+      try {
+        val result = ocrRepository.processPageOcr(paperId = paperId, pageId = pageId)
+        if (inFlightOcrTokens[pageId] != requestToken) return@launch
+
+        result.fold(
+          onSuccess = { text ->
+            if (inFlightOcrTokens[pageId] != requestToken) return@fold
+            _uiState.update {
+              if (inFlightOcrTokens[pageId] != requestToken) return@update it
+              it.copy(
+                ocrLoadingPageIds = it.ocrLoadingPageIds - pageId,
+                ocrTextByPageId = it.ocrTextByPageId + (pageId to text),
+                feedbackMessage = "Handwriting transcribed successfully.",
+              )
+            }
+          },
+          onFailure = { error ->
+            if (error is CancellationException) throw error
+            if (inFlightOcrTokens[pageId] != requestToken) return@fold
+            _uiState.update {
+              if (inFlightOcrTokens[pageId] != requestToken) return@update it
+              it.copy(
+                ocrLoadingPageIds = it.ocrLoadingPageIds - pageId,
+                ocrErrorByPageId = it.ocrErrorByPageId + (pageId to (error.localizedMessage ?: "OCR processing failed.")),
+              )
+            }
           }
-        },
-        onFailure = { error ->
-          _uiState.update {
-            it.copy(
-              ocrLoadingPageIds = it.ocrLoadingPageIds - pageId,
-              ocrErrorByPageId = it.ocrErrorByPageId + (pageId to (error.localizedMessage ?: "OCR processing failed.")),
-            )
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } finally {
+        if (inFlightOcrTokens[pageId] == requestToken) {
+          inFlightOcrTokens.remove(pageId)
+          inFlightOcrJobs.remove(pageId)
+          _uiState.update { state ->
+            if (pageId in state.ocrLoadingPageIds) {
+              state.copy(ocrLoadingPageIds = state.ocrLoadingPageIds - pageId)
+            } else {
+              state
+            }
           }
         }
-      )
+      }
+    }
+
+    if (inFlightOcrTokens[pageId] == requestToken) {
+      inFlightOcrJobs[pageId] = job
+    }
+  }
+
+  fun cancelOcrForPage(pageId: String) {
+    if (pageId.isBlank()) return
+    inFlightOcrTokens.remove(pageId)
+    inFlightOcrJobs.remove(pageId)?.cancel()
+    _uiState.update {
+      it.copy(ocrLoadingPageIds = it.ocrLoadingPageIds - pageId)
     }
   }
 
@@ -341,30 +556,52 @@ class StudentDetailViewModel(
     _uiState.update { it.copy(ocrErrorByPageId = it.ocrErrorByPageId - pageId) }
   }
 
-  private suspend fun loadExistingEvaluationForPaper(paperId: String): AiEvaluationResponse? =
+  internal sealed interface ExistingEvaluationLookupResult {
+    data class Found(val response: AiEvaluationResponse) : ExistingEvaluationLookupResult
+    data object NotFound : ExistingEvaluationLookupResult
+    data class Failed(val error: Throwable) : ExistingEvaluationLookupResult
+  }
+
+  internal suspend fun loadExistingEvaluationForPaper(paperId: String): ExistingEvaluationLookupResult =
     withContext(Dispatchers.IO) {
       try {
-        if (!SupabaseClientProvider.isConfigured()) return@withContext null
-        val session = SupabaseClientProvider.client.auth.currentSessionOrNull()
-        if (session?.accessToken.isNullOrBlank()) return@withContext null
-
-        val evalRecords = SupabaseClientProvider.client.postgrest["student_paper_evaluations"]
-          .select {
-            filter {
-              eq("paper_id", paperId)
-            }
+        val (evalRecord, questionRecords) = if (existingEvaluationDbFetcher != null) {
+          existingEvaluationDbFetcher.invoke(paperId)
+            ?: return@withContext ExistingEvaluationLookupResult.NotFound
+        } else {
+          if (!SupabaseClientProvider.isConfigured()) {
+            return@withContext ExistingEvaluationLookupResult.Failed(
+              IllegalStateException("Supabase is not configured yet.")
+            )
           }
-          .decodeList<EvaluationDbRecord>()
-
-        val evalRecord = evalRecords.firstOrNull() ?: return@withContext null
-
-        val questionRecords = SupabaseClientProvider.client.postgrest["student_paper_evaluation_questions"]
-          .select {
-            filter {
-              eq("evaluation_id", evalRecord.id)
-            }
+          val session = SupabaseClientProvider.client.auth.currentSessionOrNull()
+          if (session?.accessToken.isNullOrBlank()) {
+            return@withContext ExistingEvaluationLookupResult.Failed(
+              IllegalStateException("Teacher is not authenticated. Please log in again.")
+            )
           }
-          .decodeList<QuestionDbRecord>()
+
+          val evalRecords = SupabaseClientProvider.client.postgrest["student_paper_evaluations"]
+            .select {
+              filter {
+                eq("paper_id", paperId)
+              }
+            }
+            .decodeList<EvaluationDbRecord>()
+
+          val foundEval = evalRecords.firstOrNull()
+            ?: return@withContext ExistingEvaluationLookupResult.NotFound
+
+          val foundQuestions = SupabaseClientProvider.client.postgrest["student_paper_evaluation_questions"]
+            .select {
+              filter {
+                eq("evaluation_id", foundEval.id)
+              }
+            }
+            .decodeList<QuestionDbRecord>()
+
+          foundEval to foundQuestions
+        }
 
         val evaluationDetail = EvaluationDetail(
           id = evalRecord.id,
@@ -402,14 +639,18 @@ class StudentDetailViewModel(
           )
         )
 
-        AiEvaluationResponse(
-          status = evalRecord.status,
-          percentageAvailable = evaluationDetail.percentageAvailable,
-          evaluation = evaluationDetail,
+        ExistingEvaluationLookupResult.Found(
+          AiEvaluationResponse(
+            status = evalRecord.status,
+            percentageAvailable = evaluationDetail.percentageAvailable,
+            evaluation = evaluationDetail,
+          )
         )
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         Log.e("StudentDetailViewModel", "Error loading existing evaluation for paper $paperId", e)
-        null
+        ExistingEvaluationLookupResult.Failed(e)
       }
     }
 
@@ -430,12 +671,22 @@ class StudentDetailViewModel(
         resp
       }
     }
+    if (_uiState.value.evaluatedPaperId != paperId) {
+      evaluationGeneration++
+      evaluationJob?.cancel()
+      evaluationJob = null
+    }
     _uiState.update {
       it.copy(
         evaluatedPaperId = paperId,
         evaluationResult = sortedResponse,
         editedQuestions = null,
         saveCorrectionsError = null,
+        isApproving = false,
+        approvalSuccess = false,
+        approvalError = null,
+        isSavingCorrections = false,
+        saveCorrectionsSuccess = false,
       )
     }
   }
@@ -461,48 +712,138 @@ class StudentDetailViewModel(
       return
     }
 
+    val myEvalGeneration = ++evaluationGeneration
     evaluationJob?.cancel()
     evaluationJob = viewModelScope.launch {
       _uiState.update {
+        val isSamePaper = it.evaluatedPaperId == paperId
         it.copy(
           isEvaluatingPaperId = paperId,
           evaluatedPaperId = paperId,
-          evaluationResult = if (it.evaluatedPaperId == paperId) it.evaluationResult else null,
+          evaluationResult = if (isSamePaper) it.evaluationResult else null,
           evaluationResultJson = null,
           evaluationError = null,
+          isApproving = if (isSamePaper) it.isApproving else false,
+          approvalSuccess = if (isSamePaper) it.approvalSuccess else false,
+          approvalError = if (isSamePaper) it.approvalError else null,
+          isSavingCorrections = if (isSamePaper) it.isSavingCorrections else false,
+          saveCorrectionsSuccess = if (isSamePaper) it.saveCorrectionsSuccess else false,
+          saveCorrectionsError = if (isSamePaper) it.saveCorrectionsError else null,
           editedQuestions = null,
           feedbackMessage = null,
         )
       }
 
-      val existingEval = loadExistingEvaluationForPaper(paperId)
-      if (existingEval != null && existingEval.evaluation != null) {
-        val approvedDetail = existingEval.evaluation.copy(
-          status = "approved",
-          reviewRequired = false,
-        )
-        val approvedResponse = existingEval.copy(
-          status = "approved",
-          evaluation = approvedDetail,
-        )
-        _uiState.update {
-          it.copy(
-            isEvaluatingPaperId = null,
-            evaluatedPaperId = paperId,
-            evaluationResult = approvedResponse,
-            evaluationResultJson = null,
-            evaluationError = null,
-            editedQuestions = null,
-            feedbackMessage = null,
+      try {
+        val existingEval = (loadExistingEvaluationForPaper(paperId) as? ExistingEvaluationLookupResult.Found)?.response
+        if (evaluationGeneration != myEvalGeneration || _uiState.value.evaluatedPaperId != paperId) return@launch
+
+        if (existingEval != null && existingEval.evaluation != null) {
+          val existingDetail = existingEval.evaluation
+          val actualStatus = existingDetail.status?.takeIf { it.isNotBlank() }
+            ?: existingEval.status?.takeIf { it.isNotBlank() }
+          val isActuallyApproved = actualStatus.equals("approved", ignoreCase = true)
+          val resolvedDetail = if (isActuallyApproved) {
+            existingDetail.copy(
+              status = "approved",
+              reviewRequired = false,
+            )
+          } else {
+            existingDetail.copy(
+              status = actualStatus ?: existingDetail.status,
+            )
+          }
+          val resolvedResponse = existingEval.copy(
+            status = resolvedDetail.status ?: existingEval.status,
+            evaluation = resolvedDetail,
           )
+          _uiState.update { state ->
+            if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+              return@update state
+            }
+            val updatedPapers = if (!actualStatus.isNullOrBlank()) {
+              state.papers.map { paper ->
+                if (paper.id == paperId) {
+                  paper.copy(
+                    status = actualStatus,
+                    evaluation = paper.evaluation?.copy(status = actualStatus)
+                      ?: EvaluationStatus(status = actualStatus),
+                  )
+                } else {
+                  paper
+                }
+              }
+            } else {
+              state.papers
+            }
+            state.copy(
+              isEvaluatingPaperId = null,
+              evaluatedPaperId = paperId,
+              evaluationResult = resolvedResponse,
+              evaluationResultJson = null,
+              evaluationError = null,
+              editedQuestions = null,
+              papers = updatedPapers,
+              feedbackMessage = null,
+            )
+          }
+        } else {
+          _uiState.update { state ->
+            if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+              return@update state
+            }
+            state.copy(
+              isEvaluatingPaperId = null,
+              evaluationError = "Unable to load the saved approved evaluation.",
+            )
+          }
         }
+      } catch (e: CancellationException) {
+        if (evaluationGeneration == myEvalGeneration) {
+          _uiState.update { state ->
+            if (state.isEvaluatingPaperId == paperId) {
+              state.copy(isEvaluatingPaperId = null)
+            } else {
+              state
+            }
+          }
+        }
+        throw e
+      }
+    }
+  }
+
+  fun ensureEvaluationLoadedForReview(studentId: String, paperId: String) {
+    val state = _uiState.value
+    if (studentId.isNotBlank() &&
+      (state.student == null || state.student.id != studentId) &&
+      !state.isLoading &&
+      state.errorMessage == null
+    ) {
+      loadStudentAndPapers(studentId)
+      return
+    }
+    if (state.isLoading ||
+      state.errorMessage != null ||
+      (studentId.isNotBlank() && state.student?.id != studentId)
+    ) {
+      return
+    }
+    val isCurrentPaper = state.evaluatedPaperId == paperId
+    if (paperId.isNotBlank() &&
+      (!isCurrentPaper || (state.evaluationResult == null && state.evaluationError == null)) &&
+      state.isEvaluatingPaperId != paperId
+    ) {
+      val knownPaper = state.papers.find { it.id == paperId } ?: return
+      if (studentId.isNotBlank() && knownPaper.studentId.isNotBlank() && knownPaper.studentId != studentId) {
+        return
+      }
+      val isKnownApproved = knownPaper.status.equals("approved", ignoreCase = true) ||
+        knownPaper.evaluation?.status.equals("approved", ignoreCase = true)
+      if (isKnownApproved) {
+        openApprovedEvaluation(paperId)
       } else {
-        _uiState.update {
-          it.copy(
-            isEvaluatingPaperId = null,
-            evaluationError = "Unable to load the saved approved evaluation.",
-          )
-        }
+        runAiEvaluation(paperId)
       }
     }
   }
@@ -513,12 +854,17 @@ class StudentDetailViewModel(
 
     val currentState = _uiState.value
     val knownPaper = currentState.papers.find { it.id == paperId }
-    val isKnownApproved = knownPaper?.status.equals("approved", ignoreCase = true) ||
-      knownPaper?.evaluation?.status.equals("approved", ignoreCase = true) ||
-      (currentState.evaluatedPaperId == paperId && (
+    val isKnownApproved = (
+      currentState.evaluatedPaperId == paperId && (
         currentState.evaluationResult?.status.equals("approved", ignoreCase = true) ||
           currentState.evaluationResult?.evaluation?.status.equals("approved", ignoreCase = true)
-        ))
+        )
+      ) || (
+      !currentState.isLoading && (
+        knownPaper?.status.equals("approved", ignoreCase = true) ||
+          knownPaper?.evaluation?.status.equals("approved", ignoreCase = true)
+        )
+      )
 
     if (isKnownApproved) {
       openApprovedEvaluation(paperId)
@@ -540,155 +886,320 @@ class StudentDetailViewModel(
       return
     }
 
+    val myEvalGeneration = ++evaluationGeneration
     evaluationJob?.cancel()
     evaluationJob = viewModelScope.launch {
       _uiState.update {
+        val isSamePaper = it.evaluatedPaperId == paperId
         it.copy(
           isEvaluatingPaperId = paperId,
           evaluatedPaperId = paperId,
+          evaluationResult = if (isSamePaper) it.evaluationResult else null,
           evaluationResultJson = null,
           evaluationError = null,
+          isApproving = if (isSamePaper) it.isApproving else false,
+          approvalSuccess = if (isSamePaper) it.approvalSuccess else false,
+          approvalError = if (isSamePaper) it.approvalError else null,
+          isSavingCorrections = if (isSamePaper) it.isSavingCorrections else false,
+          saveCorrectionsSuccess = if (isSamePaper) it.saveCorrectionsSuccess else false,
+          saveCorrectionsError = if (isSamePaper) it.saveCorrectionsError else null,
+          editedQuestions = if (isSamePaper) it.editedQuestions else null,
         )
       }
 
-      // 1. Check if an evaluation already exists in database for this paper
-      val existingEval = loadExistingEvaluationForPaper(paperId)
-      if (existingEval != null && existingEval.evaluation != null) {
-        val evalStatus = existingEval.evaluation.status.orEmpty()
-        if (evalStatus.equals("approved", ignoreCase = true) ||
-          evalStatus.equals("completed", ignoreCase = true) ||
-          evalStatus.equals("needs_review", ignoreCase = true)
-        ) {
-          Log.i("StudentDetailViewModel", "Found existing evaluation for paper $paperId with status $evalStatus. Skipping AI grading pipeline.")
-          _uiState.update {
-            it.copy(
+      try {
+        val hadInFlightLoad = loadJob?.isActive == true
+        while (loadJob?.isActive == true) {
+          loadJob?.join()
+        }
+        if (evaluationGeneration != myEvalGeneration || _uiState.value.evaluatedPaperId != paperId) return@launch
+
+        val postLoadState = _uiState.value
+        val loadedPaper = postLoadState.papers.find { it.id == paperId }
+        val hasStudentContext = hadInFlightLoad || postLoadState.student != null || postLoadState.papers.isNotEmpty()
+        if (hasStudentContext && loadedPaper == null) {
+          _uiState.update { state ->
+            if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+              return@update state
+            }
+            state.copy(
               isEvaluatingPaperId = null,
-              evaluatedPaperId = paperId,
-              evaluationResult = existingEval,
-              evaluationResultJson = null,
-              evaluationError = null,
-              editedQuestions = if (evalStatus.equals("approved", ignoreCase = true)) null else it.editedQuestions,
-              pendingReviewNavigationPaperId = paperId,
+              evaluationError = state.errorMessage ?: "Selected paper could not be found.",
+              pendingReviewNavigationPaperId = null,
             )
           }
           return@launch
         }
-      }
-
-      // 2. Otherwise, run AI grading pipeline
-      val result = withContext(Dispatchers.IO) {
-        try {
-          if (!SupabaseClientProvider.isConfigured()) {
-            return@withContext Result.failure<String>(
-              IllegalStateException("Supabase is not configured yet.")
-            )
-          }
-
-          val session = SupabaseClientProvider.client.auth.currentSessionOrNull()
-          val accessToken = session?.accessToken
-          if (accessToken.isNullOrBlank()) {
-            return@withContext Result.failure<String>(
-              IllegalStateException("Teacher is not authenticated. Please log in again.")
-            )
-          }
-
-          val baseUrl = BuildConfig.SUPABASE_URL.trimEnd('/')
-          val endpoint = "$baseUrl/functions/v1/process-and-grade-paper"
-          val jsonBody = """{"paperId":"$paperId"}"""
-          val requestBody = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
-
-          val request = Request.Builder()
-            .url(endpoint)
-            .post(requestBody)
-            .header("Authorization", "Bearer $accessToken")
-            .header("Content-Type", "application/json")
-            .build()
-
-          val response = evaluationHttpClient.newCall(request).execute()
-          val responseBody = response.body?.string().orEmpty()
-
-          if (!response.isSuccessful) {
-            val errorMsg = "HTTP ${response.code}:\n$responseBody"
-            Log.e("StudentDetailViewModel", "Evaluation failed with $errorMsg")
-            Result.failure(Exception(errorMsg))
-          } else {
-            Result.success(responseBody)
-          }
-        } catch (e: Exception) {
-          Log.e("StudentDetailViewModel", "Error calling process-and-grade-paper", e)
-          Result.failure(e)
-        }
-      }
-
-      result.fold(
-        onSuccess = { jsonText ->
-          val parsedResponse = parseAiEvaluationResponse(jsonText, fallbackPaperId = paperId)
-          val isFailedStatus = parsedResponse?.status == "failed"
-          val errorText = if (isFailedStatus) {
-            parsedResponse?.error ?: "AI evaluation failed."
-          } else null
-
-          _uiState.update {
-            it.copy(
+        if (loadedPaper != null &&
+          postLoadState.student?.id != null &&
+          loadedPaper.studentId.isNotBlank() &&
+          loadedPaper.studentId != postLoadState.student.id
+        ) {
+          _uiState.update { state ->
+            if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+              return@update state
+            }
+            state.copy(
               isEvaluatingPaperId = null,
-              evaluatedPaperId = paperId,
-              evaluationResult = if (!isFailedStatus) parsedResponse else null,
-              evaluationResultJson = jsonText,
-              evaluationError = errorText,
-              editedQuestions = null,
-              pendingReviewNavigationPaperId = if (!isFailedStatus && parsedResponse != null) paperId else null,
+              evaluationError = "Selected paper does not belong to the active student.",
+              pendingReviewNavigationPaperId = null,
             )
           }
+          return@launch
+        }
 
-          // Refresh papers list to show updated OCR status/results on the cards
-          _uiState.value.student?.id?.let { sid ->
-            loadStudentAndPapers(sid)
-          }
-        },
-        onFailure = { error ->
-          val errMessage = error.localizedMessage ?: error.message.orEmpty()
-          val isConflict409 = errMessage.contains("409", ignoreCase = true) ||
-            errMessage.contains("already finalized", ignoreCase = true) ||
-            errMessage.contains("already approved", ignoreCase = true)
+        val isLoadedPaperApproved = loadedPaper?.status.equals("approved", ignoreCase = true) ||
+          loadedPaper?.evaluation?.status.equals("approved", ignoreCase = true)
 
-          if (isConflict409) {
-            val fallbackEval = loadExistingEvaluationForPaper(paperId)
-            if (fallbackEval != null && fallbackEval.evaluation != null) {
-              _uiState.update {
-                it.copy(
+        // 1. Check if an evaluation already exists in database for this paper
+        when (val lookupResult = loadExistingEvaluationForPaper(paperId)) {
+          is ExistingEvaluationLookupResult.Found -> {
+            if (evaluationGeneration != myEvalGeneration || _uiState.value.evaluatedPaperId != paperId) return@launch
+            val existingEval = lookupResult.response
+            val existingDetail = existingEval.evaluation
+            if (existingDetail != null) {
+              val evalStatus = existingDetail.status?.takeIf { it.isNotBlank() }
+                ?: existingEval.status?.takeIf { it.isNotBlank() }
+                ?: ""
+              if (evalStatus.equals("approved", ignoreCase = true) ||
+                evalStatus.equals("completed", ignoreCase = true) ||
+                evalStatus.equals("needs_review", ignoreCase = true) ||
+                isLoadedPaperApproved
+              ) {
+                Log.i("StudentDetailViewModel", "Found existing evaluation for paper $paperId with status $evalStatus. Skipping AI grading pipeline.")
+                val isActuallyApproved = evalStatus.equals("approved", ignoreCase = true)
+                val resolvedDetail = if (isActuallyApproved) {
+                  existingDetail.copy(
+                    status = "approved",
+                    reviewRequired = false,
+                  )
+                } else {
+                  existingDetail.copy(
+                    status = evalStatus.ifBlank { existingDetail.status },
+                  )
+                }
+                val resolvedResponse = existingEval.copy(
+                  status = resolvedDetail.status ?: existingEval.status,
+                  evaluation = resolvedDetail,
+                )
+                _uiState.update { state ->
+                  if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+                    return@update state
+                  }
+                  state.copy(
+                    isEvaluatingPaperId = null,
+                    evaluatedPaperId = paperId,
+                    evaluationResult = resolvedResponse,
+                    evaluationResultJson = null,
+                    evaluationError = null,
+                    editedQuestions = if (isActuallyApproved) null else state.editedQuestions,
+                    pendingReviewNavigationPaperId = paperId,
+                  )
+                }
+                return@launch
+              }
+            }
+            if (isLoadedPaperApproved) {
+              _uiState.update { state ->
+                if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+                  return@update state
+                }
+                state.copy(
                   isEvaluatingPaperId = null,
-                  evaluatedPaperId = paperId,
-                  evaluationResult = fallbackEval,
+                  evaluationError = "Unable to load the saved approved evaluation.",
+                  evaluationResult = null,
                   evaluationResultJson = null,
-                  evaluationError = null,
-                  editedQuestions = null,
-                  pendingReviewNavigationPaperId = paperId,
+                  pendingReviewNavigationPaperId = null,
                 )
               }
               return@launch
             }
           }
-
-          _uiState.update {
-            it.copy(
-              isEvaluatingPaperId = null,
-              evaluationError = error.localizedMessage ?: "Unknown network error during evaluation.",
-              evaluationResult = null,
-              evaluationResultJson = null,
-            )
+          is ExistingEvaluationLookupResult.Failed -> {
+            if (evaluationGeneration != myEvalGeneration || _uiState.value.evaluatedPaperId != paperId) return@launch
+            val errorMsg = lookupResult.error.localizedMessage
+              ?.takeIf { it.isNotBlank() }
+              ?: "Failed to check existing evaluation before starting AI grading. Please try again."
+            _uiState.update { state ->
+              if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+                return@update state
+              }
+              state.copy(
+                isEvaluatingPaperId = null,
+                evaluationError = errorMsg,
+                evaluationResult = null,
+                evaluationResultJson = null,
+                pendingReviewNavigationPaperId = null,
+              )
+            }
+            return@launch
           }
-
-          // Refresh papers list to show updated OCR status/results on the cards
-          _uiState.value.student?.id?.let { sid ->
-            loadStudentAndPapers(sid)
+          ExistingEvaluationLookupResult.NotFound -> {
+            if (evaluationGeneration != myEvalGeneration || _uiState.value.evaluatedPaperId != paperId) return@launch
+            if (isLoadedPaperApproved) {
+              _uiState.update { state ->
+                if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+                  return@update state
+                }
+                state.copy(
+                  isEvaluatingPaperId = null,
+                  evaluationError = "Unable to load the saved approved evaluation.",
+                  evaluationResult = null,
+                  evaluationResultJson = null,
+                  pendingReviewNavigationPaperId = null,
+                )
+              }
+              return@launch
+            }
           }
         }
-      )
+
+        // 2. Otherwise, run AI grading pipeline
+        val result = withContext(Dispatchers.IO) {
+          try {
+            val accessToken = if (evaluationAccessTokenProvider != null) {
+              evaluationAccessTokenProvider.invoke()
+            } else {
+              if (!SupabaseClientProvider.isConfigured()) {
+                return@withContext Result.failure<String>(
+                  IllegalStateException("Supabase is not configured yet.")
+                )
+              }
+              val session = SupabaseClientProvider.client.auth.currentSessionOrNull()
+              session?.accessToken
+            }
+
+            if (accessToken.isNullOrBlank()) {
+              return@withContext Result.failure<String>(
+                IllegalStateException("Teacher is not authenticated. Please log in again.")
+              )
+            }
+
+            val baseUrl = BuildConfig.SUPABASE_URL.trimEnd('/').ifBlank { "https://example.supabase.co" }
+            val endpoint = "$baseUrl/functions/v1/process-and-grade-paper"
+            val jsonBody = """{"paperId":"$paperId"}"""
+            val requestBody = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val request = Request.Builder()
+              .url(endpoint)
+              .post(requestBody)
+              .header("Authorization", "Bearer $accessToken")
+              .header("Content-Type", "application/json")
+              .build()
+
+            val response = evaluationHttpClient.executeCancellable(request)
+            val responseBody = response.body
+
+            if (!response.isSuccessful) {
+              val errorMsg = "HTTP ${response.code}:\n$responseBody"
+              Log.e("StudentDetailViewModel", "Evaluation failed with $errorMsg")
+              Result.failure(Exception(errorMsg))
+            } else {
+              Result.success(responseBody)
+            }
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            Log.e("StudentDetailViewModel", "Error calling process-and-grade-paper", e)
+            Result.failure(e)
+          }
+        }
+
+        if (evaluationGeneration != myEvalGeneration || _uiState.value.evaluatedPaperId != paperId) return@launch
+
+        result.fold(
+          onSuccess = { jsonText ->
+            val parsedResponse = parseAiEvaluationResponse(jsonText, fallbackPaperId = paperId)
+            val isFailedStatus = parsedResponse?.status == "failed"
+            val errorText = if (isFailedStatus) {
+              parsedResponse?.error ?: "AI evaluation failed."
+            } else null
+
+            _uiState.update { state ->
+              if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+                return@update state
+              }
+              state.copy(
+                isEvaluatingPaperId = null,
+                evaluatedPaperId = paperId,
+                evaluationResult = if (!isFailedStatus) parsedResponse else null,
+                evaluationResultJson = jsonText,
+                evaluationError = errorText,
+                editedQuestions = null,
+                pendingReviewNavigationPaperId = if (!isFailedStatus && parsedResponse != null) paperId else null,
+              )
+            }
+
+            // Refresh papers list to show updated OCR status/results on the cards
+            _uiState.value.student?.id?.let { sid ->
+              loadStudentAndPapers(sid)
+            }
+          },
+          onFailure = { error ->
+            if (error is CancellationException) throw error
+            val errMessage = error.localizedMessage ?: error.message.orEmpty()
+            val isConflict409 = errMessage.contains("409", ignoreCase = true) ||
+              errMessage.contains("already finalized", ignoreCase = true) ||
+              errMessage.contains("already approved", ignoreCase = true)
+
+            if (isConflict409) {
+              val fallbackEval = (loadExistingEvaluationForPaper(paperId) as? ExistingEvaluationLookupResult.Found)?.response
+              if (evaluationGeneration != myEvalGeneration || _uiState.value.evaluatedPaperId != paperId) return@launch
+              if (fallbackEval != null && fallbackEval.evaluation != null) {
+                _uiState.update { state ->
+                  if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+                    return@update state
+                  }
+                  state.copy(
+                    isEvaluatingPaperId = null,
+                    evaluatedPaperId = paperId,
+                    evaluationResult = fallbackEval,
+                    evaluationResultJson = null,
+                    evaluationError = null,
+                    editedQuestions = null,
+                    pendingReviewNavigationPaperId = paperId,
+                  )
+                }
+                return@launch
+              }
+            }
+
+            _uiState.update { state ->
+              if (evaluationGeneration != myEvalGeneration || state.evaluatedPaperId != paperId) {
+                return@update state
+              }
+              state.copy(
+                isEvaluatingPaperId = null,
+                evaluationError = error.localizedMessage ?: "Unknown network error during evaluation.",
+                evaluationResult = null,
+                evaluationResultJson = null,
+              )
+            }
+
+            // Refresh papers list to show updated OCR status/results on the cards
+            _uiState.value.student?.id?.let { sid ->
+              loadStudentAndPapers(sid)
+            }
+          }
+        )
+      } catch (e: CancellationException) {
+        if (evaluationGeneration == myEvalGeneration) {
+          _uiState.update { state ->
+            if (state.isEvaluatingPaperId == paperId) {
+              state.copy(isEvaluatingPaperId = null)
+            } else {
+              state
+            }
+          }
+        }
+        throw e
+      }
     }
   }
 
   fun stopAiEvaluation(paperId: String) {
     if (_uiState.value.isEvaluatingPaperId == paperId) {
+      evaluationGeneration++
       evaluationJob?.cancel()
       evaluationJob = null
       _uiState.update { it.copy(isEvaluatingPaperId = null) }
@@ -700,9 +1211,14 @@ class StudentDetailViewModel(
 
   fun approveEvaluation(evaluationId: String, paperId: String) {
     if (evaluationId.isBlank() || paperId.isBlank()) return
+    if (inFlightApprovalPaperIds.contains(paperId)) return
 
     val state = _uiState.value
+    if (state.evaluatedPaperId != null && state.evaluatedPaperId != paperId) return
     val currentEval = state.evaluationResult?.evaluation
+    if (!currentEval?.id.isNullOrBlank() && currentEval?.id != evaluationId) return
+    if (state.isApproving) return
+
     val isAlreadyApprovedState = currentEval?.status.equals("approved", ignoreCase = true) ||
       state.evaluationResult?.status.equals("approved", ignoreCase = true)
     if (isAlreadyApprovedState) {
@@ -712,7 +1228,7 @@ class StudentDetailViewModel(
       return
     }
 
-    if (state.isSavingCorrections) {
+    if (state.isSavingCorrections || inFlightSavePaperIds.contains(paperId)) {
       _uiState.update {
         it.copy(
           isApproving = false,
@@ -770,105 +1286,86 @@ class StudentDetailViewModel(
       return
     }
 
+    if (!inFlightApprovalPaperIds.add(paperId)) return
+    val expectedEvalGeneration = evaluationGeneration
+    _uiState.update {
+      it.copy(
+        evaluatedPaperId = it.evaluatedPaperId ?: paperId,
+        isApproving = true,
+        approvalSuccess = false,
+        approvalError = null,
+      )
+    }
+
     viewModelScope.launch {
-      _uiState.update {
-        it.copy(
-          isApproving = true,
-          approvalError = null,
-        )
-      }
-
-      val result = if (approveEvaluationAction != null) {
-        try {
-          approveEvaluationAction.invoke(evaluationId, paperId)
-        } catch (e: Exception) {
-          Result.failure(e)
-        }
-      } else {
-        withContext(Dispatchers.IO) {
+      try {
+        val result = if (approveEvaluationAction != null) {
           try {
-            if (!SupabaseClientProvider.isConfigured()) {
-              return@withContext Result.failure<Unit>(
-                IllegalStateException("Supabase is not configured yet.")
-              )
-            }
-
-            val session = SupabaseClientProvider.client.auth.currentSessionOrNull()
-            val accessToken = session?.accessToken
-            if (accessToken.isNullOrBlank()) {
-              return@withContext Result.failure<Unit>(
-                IllegalStateException("Teacher is not authenticated. Please log in again.")
-              )
-            }
-
-            val params = buildJsonObject {
-              put("p_evaluation_id", evaluationId)
-              put("p_paper_id", paperId)
-            }
-
-            SupabaseClientProvider.client.postgrest.rpc(
-              function = "approve_paper_evaluation",
-              parameters = params,
-            )
-
-            Result.success(Unit)
+            approveEvaluationAction.invoke(evaluationId, paperId)
+          } catch (e: CancellationException) {
+            throw e
           } catch (e: Exception) {
-            Log.e("StudentDetailViewModel", "Error approving evaluation", e)
             Result.failure(e)
           }
-        }
-      }
-
-      result.fold(
-        onSuccess = {
-          _uiState.update { state ->
-            val updatedDetail = state.evaluationResult?.evaluation?.copy(
-              status = "approved",
-              reviewRequired = false,
-            )
-            val updatedResponse = state.evaluationResult?.copy(
-              status = "approved",
-              evaluation = updatedDetail,
-            )
-            val updatedPapers = state.papers.map { paper ->
-              if (paper.id == paperId) {
-                paper.copy(
-                  status = "approved",
-                  evaluation = EvaluationStatus(status = "approved"),
+        } else {
+          withContext(Dispatchers.IO) {
+            try {
+              if (!SupabaseClientProvider.isConfigured()) {
+                return@withContext Result.failure<Unit>(
+                  IllegalStateException("Supabase is not configured yet.")
                 )
-              } else paper
-            }
-            state.copy(
-              isApproving = false,
-              approvalSuccess = true,
-              approvalError = null,
-              evaluationResult = updatedResponse,
-              editedQuestions = null,
-              papers = updatedPapers,
-              feedbackMessage = "Result approved and saved successfully.",
-            )
-          }
-          // Refresh papers list to update the "status" on the paper cards (e.g. from 'scanned' to 'approved')
-          _uiState.value.student?.id?.let { sid ->
-            loadStudentAndPapers(sid)
-          }
-        },
-        onFailure = { error ->
-          val rawMessage = error.localizedMessage ?: error.message.orEmpty()
-          val isAlreadyApproved = rawMessage.contains("already approved", ignoreCase = true) ||
-            rawMessage.contains("cannot be modified or re-approved", ignoreCase = true)
+              }
 
-          if (isAlreadyApproved) {
-            _uiState.update { state ->
-              val updatedDetail = state.evaluationResult?.evaluation?.copy(
+              val session = SupabaseClientProvider.client.auth.currentSessionOrNull()
+              val accessToken = session?.accessToken
+              if (accessToken.isNullOrBlank()) {
+                return@withContext Result.failure<Unit>(
+                  IllegalStateException("Teacher is not authenticated. Please log in again.")
+                )
+              }
+
+              val params = buildJsonObject {
+                put("p_evaluation_id", evaluationId)
+                put("p_paper_id", paperId)
+              }
+
+              SupabaseClientProvider.client.postgrest.rpc(
+                function = "approve_paper_evaluation",
+                parameters = params,
+              )
+
+              Result.success(Unit)
+            } catch (e: CancellationException) {
+              throw e
+            } catch (e: Exception) {
+              Log.e("StudentDetailViewModel", "Error approving evaluation", e)
+              Result.failure(e)
+            }
+          }
+        }
+
+        result.fold(
+          onSuccess = {
+            if (evaluationGeneration != expectedEvalGeneration || _uiState.value.evaluatedPaperId != paperId) {
+              return@fold
+            }
+            _uiState.update { currentState ->
+              val currentEvalId = currentState.evaluationResult?.evaluation?.id
+              if (evaluationGeneration != expectedEvalGeneration ||
+                currentState.evaluatedPaperId != paperId ||
+                (!currentEvalId.isNullOrBlank() && currentEvalId != evaluationId)
+              ) {
+                return@update currentState
+              }
+              val updatedDetail = currentState.evaluationResult?.evaluation?.copy(
                 status = "approved",
                 reviewRequired = false,
               )
-              val updatedResponse = state.evaluationResult?.copy(
+              val updatedResponse = currentState.evaluationResult?.copy(
                 status = "approved",
                 evaluation = updatedDetail,
               )
-              val updatedPapers = state.papers.map { paper ->
+              val updatedPapers = currentState.papers.map { paper ->
                 if (paper.id == paperId) {
                   paper.copy(
                     status = "approved",
@@ -876,40 +1373,110 @@ class StudentDetailViewModel(
                   )
                 } else paper
               }
-              state.copy(
+              currentState.copy(
                 isApproving = false,
                 approvalSuccess = true,
                 approvalError = null,
                 evaluationResult = updatedResponse,
                 editedQuestions = null,
                 papers = updatedPapers,
-                feedbackMessage = "This result has already been approved.",
+                feedbackMessage = "Result approved and saved successfully.",
               )
             }
-          } else {
-            val userFriendlyError = when {
-              rawMessage.contains("Unauthorized", ignoreCase = true) ->
-                "You are not authorized to approve this evaluation."
-              rawMessage.contains("not ready for approval", ignoreCase = true) ->
-                "Evaluation is not ready for approval."
-              rawMessage.contains("Evaluation not found", ignoreCase = true) ->
-                "Evaluation record was not found."
-              rawMessage.isNotBlank() ->
-                "Approval failed: ${rawMessage.substringBefore("\n")}"
-              else ->
-                "Approval failed. Please try again."
+          },
+          onFailure = { error ->
+            if (error is CancellationException) throw error
+            if (evaluationGeneration != expectedEvalGeneration || _uiState.value.evaluatedPaperId != paperId) {
+              return@fold
             }
+            val rawMessage = error.localizedMessage ?: error.message.orEmpty()
+            val isAlreadyApproved = rawMessage.contains("already approved", ignoreCase = true) ||
+              rawMessage.contains("cannot be modified or re-approved", ignoreCase = true)
 
-            _uiState.update { state ->
-              state.copy(
-                isApproving = false,
-                approvalSuccess = false,
-                approvalError = userFriendlyError,
-              )
+            if (isAlreadyApproved) {
+              _uiState.update { currentState ->
+                val currentEvalId = currentState.evaluationResult?.evaluation?.id
+                if (evaluationGeneration != expectedEvalGeneration ||
+                  currentState.evaluatedPaperId != paperId ||
+                  (!currentEvalId.isNullOrBlank() && currentEvalId != evaluationId)
+                ) {
+                  return@update currentState
+                }
+                val updatedDetail = currentState.evaluationResult?.evaluation?.copy(
+                  status = "approved",
+                  reviewRequired = false,
+                )
+                val updatedResponse = currentState.evaluationResult?.copy(
+                  status = "approved",
+                  evaluation = updatedDetail,
+                )
+                val updatedPapers = currentState.papers.map { paper ->
+                  if (paper.id == paperId) {
+                    paper.copy(
+                      status = "approved",
+                      evaluation = EvaluationStatus(status = "approved"),
+                    )
+                  } else paper
+                }
+                currentState.copy(
+                  isApproving = false,
+                  approvalSuccess = true,
+                  approvalError = null,
+                  evaluationResult = updatedResponse,
+                  editedQuestions = null,
+                  papers = updatedPapers,
+                  feedbackMessage = "This result has already been approved.",
+                )
+              }
+            } else {
+              val userFriendlyError = when {
+                rawMessage.contains("Unauthorized", ignoreCase = true) ->
+                  "You are not authorized to approve this evaluation."
+                rawMessage.contains("not ready for approval", ignoreCase = true) ->
+                  "Evaluation is not ready for approval."
+                rawMessage.contains("Evaluation not found", ignoreCase = true) ->
+                  "Evaluation record was not found."
+                rawMessage.isNotBlank() ->
+                  "Approval failed: ${rawMessage.substringBefore("\n")}"
+                else ->
+                  "Approval failed. Please try again."
+              }
+
+              _uiState.update { currentState ->
+                val currentEvalId = currentState.evaluationResult?.evaluation?.id
+                if (evaluationGeneration != expectedEvalGeneration ||
+                  currentState.evaluatedPaperId != paperId ||
+                  (!currentEvalId.isNullOrBlank() && currentEvalId != evaluationId)
+                ) {
+                  return@update currentState
+                }
+                currentState.copy(
+                  isApproving = false,
+                  approvalSuccess = false,
+                  approvalError = userFriendlyError,
+                )
+              }
             }
           }
+        )
+      } catch (e: CancellationException) {
+        _uiState.update { currentState ->
+          if (evaluationGeneration == expectedEvalGeneration &&
+            currentState.evaluatedPaperId == paperId &&
+            currentState.isApproving
+          ) {
+            currentState.copy(
+              isApproving = false,
+              approvalSuccess = false,
+            )
+          } else {
+            currentState
+          }
         }
-      )
+        throw e
+      } finally {
+        inFlightApprovalPaperIds.remove(paperId)
+      }
     }
   }
 
@@ -918,6 +1485,9 @@ class StudentDetailViewModel(
   }
 
   fun dismissEvaluationDialog() {
+    evaluationGeneration++
+    evaluationJob?.cancel()
+    evaluationJob = null
     _uiState.update {
       it.copy(
         evaluationResult = null,
@@ -1010,15 +1580,23 @@ class StudentDetailViewModel(
   }
 
   fun saveTeacherCorrections(evaluationId: String, paperId: String) {
+    if (evaluationId.isBlank() || paperId.isBlank()) return
+    if (inFlightSavePaperIds.contains(paperId)) return
+
     val state = _uiState.value
+    if (state.evaluatedPaperId != null && state.evaluatedPaperId != paperId) return
+    val currentEval = state.evaluationResult?.evaluation
+    if (!currentEval?.id.isNullOrBlank() && currentEval?.id != evaluationId) return
+    if (state.isSavingCorrections || state.isApproving || inFlightApprovalPaperIds.contains(paperId)) return
+
     val isApproved = state.evaluationResult?.status.equals("approved", ignoreCase = true) ||
-      state.evaluationResult?.evaluation?.status.equals("approved", ignoreCase = true)
+      currentEval?.status.equals("approved", ignoreCase = true)
     if (isApproved) return
 
-    val rawQuestions = state.editedQuestions ?: state.evaluationResult?.evaluation?.questions ?: return
+    val rawQuestions = state.editedQuestions ?: currentEval?.questions ?: return
     val questions = sortEvaluationQuestionsNumerically(rawQuestions)
     val totalPossibleMarks = state.classRoom?.totalMarks?.toDouble()
-      ?: state.evaluationResult?.evaluation?.totalMarks
+      ?: currentEval?.totalMarks
       ?: calculateEffectiveEvaluationQuestionTotalMarks(questions)
 
     val validationError = validatePaperEvaluationForSave(questions, totalPossibleMarks)
@@ -1033,97 +1611,172 @@ class StudentDetailViewModel(
       return
     }
 
-    val studentId = state.student?.id ?: state.evaluationResult?.evaluation?.studentId ?: return
-    val classId = state.classRoom?.id ?: state.evaluationResult?.evaluation?.classId ?: return
-    val teacherId = state.evaluationResult?.evaluation?.teacherId ?: return
+    val studentId = state.student?.id ?: currentEval?.studentId ?: return
+    val classId = state.classRoom?.id ?: currentEval?.classId ?: return
+    val teacherId = currentEval?.teacherId ?: state.student?.teacherId ?: state.classRoom?.teacherId ?: return
+
+    if (!inFlightSavePaperIds.add(paperId)) return
+    val expectedEvalGeneration = evaluationGeneration
+    _uiState.update {
+      it.copy(
+        evaluatedPaperId = it.evaluatedPaperId ?: paperId,
+        isSavingCorrections = true,
+        saveCorrectionsSuccess = false,
+        saveCorrectionsError = null,
+      )
+    }
 
     viewModelScope.launch {
-      _uiState.update { it.copy(isSavingCorrections = true, saveCorrectionsError = null) }
-
-      val result = withContext(Dispatchers.IO) {
-        try {
-          if (!SupabaseClientProvider.isConfigured()) {
-            return@withContext Result.failure<AiEvaluationResponse>(
-              IllegalStateException("Supabase is not configured yet.")
-            )
+      try {
+        val result = if (saveTeacherCorrectionsAction != null) {
+          try {
+            saveTeacherCorrectionsAction.invoke(evaluationId, paperId)
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            Result.failure(e)
           }
+        } else {
+          withContext(Dispatchers.IO) {
+            try {
+              if (!SupabaseClientProvider.isConfigured()) {
+                return@withContext Result.failure<AiEvaluationResponse>(
+                  IllegalStateException("Supabase is not configured yet.")
+                )
+              }
 
-          val totalMarksObtained = calculateCountedEvaluationTotalMarks(questions, totalPossibleMarks)
-          val effectiveExtractedTotal = calculateEffectiveEvaluationQuestionTotalMarks(questions)
-          val marksMatchTotal = effectiveExtractedTotal <= 0.0 ||
-            kotlin.math.abs(effectiveExtractedTotal - totalPossibleMarks) <= 0.01
-          val percentage = if (totalPossibleMarks > 0.0 && marksMatchTotal) {
-            (Math.round((totalMarksObtained / totalPossibleMarks) * 10000) / 100.0).coerceIn(0.0, 100.0)
-          } else null
+              val totalMarksObtained = calculateCountedEvaluationTotalMarks(questions, totalPossibleMarks)
+              val effectiveExtractedTotal = calculateEffectiveEvaluationQuestionTotalMarks(questions)
+              val marksMatchTotal = effectiveExtractedTotal <= 0.0 ||
+                kotlin.math.abs(effectiveExtractedTotal - totalPossibleMarks) <= 0.01
+              val percentage = if (totalPossibleMarks > 0.0 && marksMatchTotal) {
+                (Math.round((totalMarksObtained / totalPossibleMarks) * 10000) / 100.0).coerceIn(0.0, 100.0)
+              } else null
 
-          val questionsJson = questions.map { q ->
-            buildJsonObject {
-              put("question_number", q.questionNumber)
-              put("question_text", q.questionText)
-              put("maximum_marks", q.maximumMarks)
-              put("student_answer", q.studentAnswer)
-              put("expected_answer", q.expectedAnswer)
-              put("marking_criteria", q.markingCriteria)
-              put("awarded_marks", q.awardedMarks)
-              put("feedback", q.feedback)
-              put("review_required", q.reviewRequired)
-              put("review_reason", q.reviewReason)
+              val questionsJson = questions.map { q ->
+                buildJsonObject {
+                  put("question_number", q.questionNumber)
+                  put("question_text", q.questionText)
+                  put("maximum_marks", q.maximumMarks)
+                  put("student_answer", q.studentAnswer)
+                  put("expected_answer", q.expectedAnswer)
+                  put("marking_criteria", q.markingCriteria)
+                  put("awarded_marks", q.awardedMarks)
+                  put("feedback", q.feedback)
+                  put("review_required", q.reviewRequired)
+                  put("review_reason", q.reviewReason)
+                }
+              }
+
+              val params = buildJsonObject {
+                put("p_paper_id", paperId)
+                put("p_student_id", studentId)
+                put("p_class_id", classId)
+                put("p_teacher_id", teacherId)
+                put("p_status", "needs_review") // Keep as needs_review until approved
+                put("p_total_marks_obtained", totalMarksObtained)
+                put("p_total_marks", totalPossibleMarks)
+                put("p_percentage", percentage)
+                put("p_review_required", true)
+                put("p_review_reason", "Teacher corrected")
+                put("p_questions", kotlinx.serialization.json.JsonArray(questionsJson))
+              }
+
+              val response = SupabaseClientProvider.client.postgrest.rpc(
+                function = "save_provisional_paper_evaluation",
+                parameters = params,
+              )
+
+              val updatedEval = parseAiEvaluationResponse(response.data, fallbackPaperId = paperId)
+              if (updatedEval != null) {
+                Result.success(updatedEval)
+              } else {
+                Result.failure(Exception("Failed to parse updated evaluation."))
+              }
+            } catch (e: CancellationException) {
+              throw e
+            } catch (e: Exception) {
+              Log.e("StudentDetailViewModel", "Error saving teacher corrections", e)
+              Result.failure(e)
             }
           }
+        }
 
-          val params = buildJsonObject {
-            put("p_paper_id", paperId)
-            put("p_student_id", studentId)
-            put("p_class_id", classId)
-            put("p_teacher_id", teacherId)
-            put("p_status", "needs_review") // Keep as needs_review until approved
-            put("p_total_marks_obtained", totalMarksObtained)
-            put("p_total_marks", totalPossibleMarks)
-            put("p_percentage", percentage)
-            put("p_review_required", true)
-            put("p_review_reason", "Teacher corrected")
-            put("p_questions", kotlinx.serialization.json.JsonArray(questionsJson))
+        result.fold(
+          onSuccess = { updatedResponse ->
+            if (evaluationGeneration != expectedEvalGeneration || _uiState.value.evaluatedPaperId != paperId) {
+              return@fold
+            }
+            val sortedResponse = updatedResponse.let { resp ->
+              val eval = resp.evaluation
+              if (eval != null) {
+                resp.copy(
+                  evaluation = eval.copy(
+                    questions = sortEvaluationQuestionsNumerically(eval.questions)
+                  )
+                )
+              } else {
+                resp
+              }
+            }
+            _uiState.update { currentState ->
+              val currentEvalId = currentState.evaluationResult?.evaluation?.id
+              if (evaluationGeneration != expectedEvalGeneration ||
+                currentState.evaluatedPaperId != paperId ||
+                (!currentEvalId.isNullOrBlank() && currentEvalId != evaluationId)
+              ) {
+                return@update currentState
+              }
+              currentState.copy(
+                isSavingCorrections = false,
+                saveCorrectionsSuccess = true,
+                saveCorrectionsError = null,
+                approvalError = null,
+                evaluationResult = sortedResponse,
+                editedQuestions = null,
+                feedbackMessage = "Corrections saved successfully.",
+              )
+            }
+          },
+          onFailure = { error ->
+            if (error is CancellationException) throw error
+            if (evaluationGeneration != expectedEvalGeneration || _uiState.value.evaluatedPaperId != paperId) {
+              return@fold
+            }
+            _uiState.update { currentState ->
+              val currentEvalId = currentState.evaluationResult?.evaluation?.id
+              if (evaluationGeneration != expectedEvalGeneration ||
+                currentState.evaluatedPaperId != paperId ||
+                (!currentEvalId.isNullOrBlank() && currentEvalId != evaluationId)
+              ) {
+                return@update currentState
+              }
+              currentState.copy(
+                isSavingCorrections = false,
+                saveCorrectionsSuccess = false,
+                saveCorrectionsError = error.localizedMessage ?: "Failed to save corrections.",
+              )
+            }
           }
-
-          val response = SupabaseClientProvider.client.postgrest.rpc(
-            function = "save_provisional_paper_evaluation",
-            parameters = params,
-          )
-
-          val updatedEval = parseAiEvaluationResponse(response.data, fallbackPaperId = paperId)
-          if (updatedEval != null) {
-            Result.success(updatedEval)
+        )
+      } catch (e: CancellationException) {
+        _uiState.update { currentState ->
+          if (evaluationGeneration == expectedEvalGeneration &&
+            currentState.evaluatedPaperId == paperId &&
+            currentState.isSavingCorrections
+          ) {
+            currentState.copy(
+              isSavingCorrections = false,
+              saveCorrectionsSuccess = false,
+            )
           } else {
-            Result.failure(Exception("Failed to parse updated evaluation."))
+            currentState
           }
-        } catch (e: Exception) {
-          Log.e("StudentDetailViewModel", "Error saving teacher corrections", e)
-          Result.failure(e)
         }
+        throw e
+      } finally {
+        inFlightSavePaperIds.remove(paperId)
       }
-
-      result.fold(
-        onSuccess = { updatedResponse ->
-          _uiState.update {
-            it.copy(
-              isSavingCorrections = false,
-              saveCorrectionsSuccess = true,
-              approvalError = null,
-              evaluationResult = updatedResponse,
-              editedQuestions = null,
-              feedbackMessage = "Corrections saved successfully.",
-            )
-          }
-        },
-        onFailure = { error ->
-          _uiState.update {
-            it.copy(
-              isSavingCorrections = false,
-              saveCorrectionsError = error.localizedMessage ?: "Failed to save corrections.",
-            )
-          }
-        }
-      )
     }
   }
 }

@@ -7,6 +7,7 @@ import com.example.data.model.AiEvaluationResponse
 import com.example.data.model.ClassRoom
 import com.example.data.model.ClassTiming
 import com.example.data.model.EvaluationDetail
+import com.example.data.model.EvaluationDbRecord
 import com.example.data.model.EvaluationQuestion
 import com.example.data.model.EvaluationStatus
 import com.example.data.model.Exam
@@ -31,14 +32,20 @@ import com.example.data.repository.ExamRepository
 import com.example.data.repository.OcrRepository
 import com.example.data.repository.PaperRepository
 import com.example.data.repository.StudentRepository
+import com.example.data.repository.SupabaseOcrRepository
+import com.example.data.repository.SupabaseStudentRepository
 import com.example.ui.auth.AuthViewModel
 import com.example.ui.classes.ClassViewModel
 import com.example.ui.exam.ExamViewModel
 import com.example.ui.home.HomeViewModel
 import com.example.ui.paper.ScanPaperViewModel
 import com.example.ui.paper.StudentDetailViewModel
+import com.example.ui.results.ClassReportViewModel
+import com.example.ui.results.ClassResultsViewModel
+import com.example.ui.results.StudentResultDetailViewModel
 import com.example.ui.student.StudentViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,7 +59,10 @@ import org.robolectric.annotation.Config
 
 class FakeAuthRepository(
   private var signedInUser: String? = null,
-  var shouldSucceed: Boolean = true
+  var shouldSucceed: Boolean = true,
+  var customUserId: String? = null,
+  var shouldFailSignOut: Boolean = false,
+  var throwSignOutCancellation: Boolean = false,
 ) : AuthRepository {
   override suspend fun signIn(email: String, password: String): Result<String> {
     return if (shouldSucceed) {
@@ -73,13 +83,19 @@ class FakeAuthRepository(
   }
 
   override suspend fun signOut(): Result<Unit> {
+    if (throwSignOutCancellation) {
+      throw kotlinx.coroutines.CancellationException("Sign out cancelled")
+    }
+    if (shouldFailSignOut) {
+      return Result.failure(Exception("Sign out network error"))
+    }
     signedInUser = null
     return Result.success(Unit)
   }
 
   override fun getCurrentUserEmail(): String? = signedInUser
 
-  override fun getCurrentUserId(): String? = if (signedInUser != null) "user-123" else null
+  override fun getCurrentUserId(): String? = if (signedInUser != null) (customUserId ?: "user-123") else null
 
   override fun isUserSignedIn(): Boolean = signedInUser != null
 
@@ -89,11 +105,41 @@ class FakeAuthRepository(
 internal class FakeExamRepository(
   initialExams: List<Exam> = emptyList(),
   var shouldFail: Boolean = false,
+  var throwCancellation: Boolean = false,
+  var swallowCancellationIntoFailure: Boolean = false,
+  var deferredExamsResult: kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>? = null,
+  var deferredExamByIdResult: kotlinx.coroutines.CompletableDeferred<Result<Exam?>>? = null,
+  var onBeforeGetExams: (() -> Unit)? = null,
 ) : ExamRepository {
   private val exams = initialExams.toMutableList()
   val deletedExamIds = mutableListOf<String>()
+  var getExamsCallCount: Int = 0
+  var getExamByIdCallCount: Int = 0
+  var cancelledRequestCount: Int = 0
 
   override suspend fun getExams(): Result<List<Exam>> {
+    getExamsCallCount++
+    if (throwCancellation) {
+      val ce = kotlinx.coroutines.CancellationException("Simulated coroutine cancellation")
+      if (swallowCancellationIntoFailure) {
+        return Result.failure(ce)
+      }
+      throw ce
+    }
+    onBeforeGetExams?.invoke()
+    val deferred = deferredExamsResult
+    if (deferred != null) {
+      return try {
+        deferred.await()
+      } catch (e: kotlinx.coroutines.CancellationException) {
+        cancelledRequestCount++
+        if (swallowCancellationIntoFailure) {
+          Result.failure(e)
+        } else {
+          throw e
+        }
+      }
+    }
     return if (shouldFail) {
       Result.failure(Exception("Failed to fetch exams"))
     } else {
@@ -102,6 +148,18 @@ internal class FakeExamRepository(
   }
 
   override suspend fun getExamById(id: String): Result<Exam?> {
+    getExamByIdCallCount++
+    if (throwCancellation) {
+      val ce = kotlinx.coroutines.CancellationException("Simulated exam by id cancellation")
+      if (swallowCancellationIntoFailure) {
+        return Result.failure(ce)
+      }
+      throw ce
+    }
+    val deferred = deferredExamByIdResult
+    if (deferred != null) {
+      return deferred.await()
+    }
     return if (shouldFail) {
       Result.failure(Exception("Failed to fetch exam"))
     } else {
@@ -141,11 +199,80 @@ internal class FakeExamRepository(
 internal class FakeClassRepository(
   initialClasses: List<ClassRoom> = emptyList(),
   var shouldFail: Boolean = false,
+  var throwCancellation: Boolean = false,
+  var swallowCancellationIntoFailure: Boolean = false,
+  var ignoreCancellationOnDeferred: Boolean = false,
+  var deferredClassesResult: kotlinx.coroutines.CompletableDeferred<Result<List<ClassRoom>>>? = null,
+  var deferredClassByIdResult: kotlinx.coroutines.CompletableDeferred<Result<ClassRoom?>>? = null,
 ) : ClassRepository {
   private val classes = initialClasses.toMutableList()
   val deletedClassIds = mutableListOf<String>()
+  var getClassesCallCount: Int = 0
+  var getClassByIdCallCount: Int = 0
+  var getClassCountCallCount: Int = 0
+  var deferredClassCountResult: kotlinx.coroutines.CompletableDeferred<Result<Int>>? = null
+  val deferredClassesByExamId = mutableMapOf<String, kotlinx.coroutines.CompletableDeferred<Result<List<ClassRoom>>>>()
+
+  override suspend fun getClassCountForTeacher(): Result<Int> {
+    getClassCountCallCount++
+    if (throwCancellation) {
+      val ce = kotlinx.coroutines.CancellationException("Simulated class count cancellation")
+      if (swallowCancellationIntoFailure) {
+        return Result.failure(ce)
+      }
+      throw ce
+    }
+    val countDeferred = deferredClassCountResult
+    if (countDeferred != null) {
+      return countDeferred.await()
+    }
+    val classesDeferred = deferredClassesResult
+    if (classesDeferred != null) {
+      return try {
+        val res = classesDeferred.await()
+        res.map { it.size }
+      } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Result.failure(e)
+      }
+    }
+    return if (shouldFail) {
+      Result.failure(Exception("Failed to fetch class count"))
+    } else {
+      Result.success(classes.size)
+    }
+  }
 
   override suspend fun getClassesByExamId(examId: String): Result<List<ClassRoom>> {
+    getClassesCallCount++
+    if (throwCancellation) {
+      val ce = kotlinx.coroutines.CancellationException("Simulated getClasses cancellation")
+      if (swallowCancellationIntoFailure) {
+        return Result.failure(ce)
+      }
+      throw ce
+    }
+    val examDeferred = deferredClassesByExamId[examId]
+    if (examDeferred != null) {
+      return if (ignoreCancellationOnDeferred) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+          examDeferred.await()
+        }
+      } else {
+        examDeferred.await()
+      }
+    }
+    val deferred = deferredClassesResult
+    if (deferred != null) {
+      return if (ignoreCancellationOnDeferred) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+          deferred.await()
+        }
+      } else {
+        deferred.await()
+      }
+    }
     return if (shouldFail) {
       Result.failure(Exception("Failed to fetch classes"))
     } else {
@@ -154,6 +281,24 @@ internal class FakeClassRepository(
   }
 
   override suspend fun getClassById(classId: String): Result<ClassRoom?> {
+    getClassByIdCallCount++
+    if (throwCancellation) {
+      val ce = kotlinx.coroutines.CancellationException("Simulated class by id cancellation")
+      if (swallowCancellationIntoFailure) {
+        return Result.failure(ce)
+      }
+      throw ce
+    }
+    val deferred = deferredClassByIdResult
+    if (deferred != null) {
+      return if (ignoreCancellationOnDeferred) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+          deferred.await()
+        }
+      } else {
+        deferred.await()
+      }
+    }
     return if (shouldFail) {
       Result.failure(Exception("Failed to fetch class"))
     } else {
@@ -207,11 +352,46 @@ internal class FakeClassRepository(
 internal class FakeStudentRepository(
   initialStudents: List<Student> = emptyList(),
   var shouldFail: Boolean = false,
+  var throwCancellation: Boolean = false,
+  var swallowCancellationIntoFailure: Boolean = false,
+  var ignoreCancellationOnDeferred: Boolean = false,
+  var deferredStudentsByClassIdResult: kotlinx.coroutines.CompletableDeferred<Result<List<Student>>>? = null,
+  var deferredStudentByIdResult: kotlinx.coroutines.CompletableDeferred<Result<Student?>>? = null,
 ) : StudentRepository {
   private val students = initialStudents.toMutableList()
   val deletedStudentIds = mutableListOf<String>()
+  var getStudentsByClassIdCallCount: Int = 0
+  var getStudentByIdCallCount: Int = 0
+  var cancelledRequestCount: Int = 0
 
   override suspend fun getStudentsByClassId(classId: String): Result<List<Student>> {
+    getStudentsByClassIdCallCount++
+    if (throwCancellation) {
+      val ce = kotlinx.coroutines.CancellationException("Simulated student list cancellation")
+      if (swallowCancellationIntoFailure) {
+        return Result.failure(ce)
+      }
+      throw ce
+    }
+    val deferred = deferredStudentsByClassIdResult
+    if (deferred != null) {
+      return try {
+        if (ignoreCancellationOnDeferred) {
+          kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            deferred.await()
+          }
+        } else {
+          deferred.await()
+        }
+      } catch (e: kotlinx.coroutines.CancellationException) {
+        cancelledRequestCount++
+        if (swallowCancellationIntoFailure) {
+          Result.failure(e)
+        } else {
+          throw e
+        }
+      }
+    }
     return if (shouldFail) {
       Result.failure(Exception("Failed to fetch students"))
     } else {
@@ -220,6 +400,24 @@ internal class FakeStudentRepository(
   }
 
   override suspend fun getStudentById(studentId: String): Result<Student?> {
+    getStudentByIdCallCount++
+    if (throwCancellation) {
+      val ce = kotlinx.coroutines.CancellationException("Simulated student by id cancellation")
+      if (swallowCancellationIntoFailure) {
+        return Result.failure(ce)
+      }
+      throw ce
+    }
+    val deferred = deferredStudentByIdResult
+    if (deferred != null) {
+      return if (ignoreCancellationOnDeferred) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+          deferred.await()
+        }
+      } else {
+        deferred.await()
+      }
+    }
     return if (shouldFail) {
       Result.failure(Exception("Failed to fetch student"))
     } else {
@@ -298,12 +496,48 @@ internal class FakeStudentRepository(
 internal class FakePaperRepository(
   initialPapers: List<StudentPaper> = emptyList(),
   var shouldFail: Boolean = false,
+  var throwCancellation: Boolean = false,
+  var swallowCancellationIntoFailure: Boolean = false,
+  var ignoreCancellationOnDeferred: Boolean = false,
+  var ignoreSignedUrlCancellation: Boolean = false,
+  var deferredPapersResult: kotlinx.coroutines.CompletableDeferred<Result<List<StudentPaper>>>? = null,
+  var deferredSignedUrlResult: kotlinx.coroutines.CompletableDeferred<Result<String>>? = null,
 ) : PaperRepository {
   private val papers = initialPapers.toMutableList()
   val deletedStoragePaths = mutableListOf<String>()
   var lastUploadedPageUris: List<Uri> = emptyList()
+  var getPapersCallCount: Int = 0
+  var getSignedPageUrlCallCount: Int = 0
+  var cancelledRequestCount: Int = 0
 
   override suspend fun getPapersByStudentId(studentId: String): Result<List<StudentPaper>> {
+    getPapersCallCount++
+    if (throwCancellation) {
+      val ce = kotlinx.coroutines.CancellationException("Simulated papers load cancellation")
+      if (swallowCancellationIntoFailure) {
+        return Result.failure(ce)
+      }
+      throw ce
+    }
+    val deferred = deferredPapersResult
+    if (deferred != null) {
+      return try {
+        if (ignoreCancellationOnDeferred) {
+          kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            deferred.await()
+          }
+        } else {
+          deferred.await()
+        }
+      } catch (e: kotlinx.coroutines.CancellationException) {
+        cancelledRequestCount++
+        if (swallowCancellationIntoFailure) {
+          Result.failure(e)
+        } else {
+          throw e
+        }
+      }
+    }
     return if (shouldFail) {
       Result.failure(Exception("Failed to fetch papers"))
     } else {
@@ -403,6 +637,17 @@ internal class FakePaperRepository(
   }
 
   override suspend fun getSignedPageUrl(storagePath: String, expiresInSeconds: Long): Result<String> {
+    getSignedPageUrlCallCount++
+    val deferred = deferredSignedUrlResult
+    if (deferred != null) {
+      return if (ignoreSignedUrlCancellation) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+          deferred.await()
+        }
+      } else {
+        deferred.await()
+      }
+    }
     return Result.success("https://signed.url/$storagePath")
   }
 }
@@ -1249,6 +1494,7 @@ class ExampleRobolectricTest {
           deletedChunks.add(pathsArg.toList())
           Unit
         }
+        "exists" -> false
         else -> throw UnsupportedOperationException("Unexpected BucketApi call: ${method.name}")
       }
     } as io.github.jan.supabase.storage.BucketApi
@@ -2549,6 +2795,2830 @@ class ExampleRobolectricTest {
     assertEquals(listOf(cameraUri1, galleryUri3), fakePaperRepo.lastUploadedPageUris)
     assertTrue(viewModel.uiState.value.pages.isEmpty())
   }
+
+  @Test
+  fun `verify HomeViewModel loadUserData loads concurrently and deduplicates in-flight calls`() = runTest {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    val exam1 = Exam(id = "exam-1", teacherId = "user-123", name = "Midterm Math", type = "Mid Term", date = "2026-10-01")
+    val exam2 = Exam(id = "exam-2", teacherId = "user-123", name = "Final Physics", type = "Final", date = "2026-10-02")
+    val class1 = ClassRoom(id = "class-1", examId = "exam-1", teacherId = "user-123", session = "2026", semester = "Fall", timing = "Morning", subjectName = "Math", totalMarks = 100)
+    val class2 = ClassRoom(id = "class-2", examId = "exam-2", teacherId = "user-123", session = "2026", semester = "Fall", timing = "Evening", subjectName = "Physics", totalMarks = 100)
+
+    val fakeAuthRepo = FakeAuthRepository(signedInUser = "teacher@school.edu")
+    val deferred1 = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    val fakeExamRepo = FakeExamRepository(initialExams = listOf(exam1, exam2), deferredExamsResult = deferred1)
+    val fakeClassRepo = FakeClassRepository(initialClasses = listOf(class1, class2))
+
+    // 1. Start initial load in init block; it suspends on deferred1
+    val homeViewModel = HomeViewModel(fakeAuthRepo, fakeExamRepo, fakeClassRepo)
+    mainLooper.idle()
+    assertTrue(homeViewModel.uiState.value.isLoading)
+    assertEquals(1, fakeExamRepo.getExamsCallCount)
+
+    // Calling loadUserData(forceRefresh = false) while in-flight is deduplicated
+    homeViewModel.loadUserData(forceRefresh = false)
+    mainLooper.idle()
+    assertEquals(1, fakeExamRepo.getExamsCallCount)
+
+    // Complete deferred1 and verify counts are populated
+    deferred1.complete(Result.success(listOf(exam1, exam2)))
+    fakeExamRepo.deferredExamsResult = null
+    mainLooper.idle()
+    assertEquals("teacher@school.edu", homeViewModel.uiState.value.teacherEmail)
+    assertEquals(2, homeViewModel.uiState.value.examCount)
+    assertEquals(2, homeViewModel.uiState.value.classCount)
+    assertFalse(homeViewModel.uiState.value.isLoading)
+    assertNull(homeViewModel.uiState.value.errorMessage)
+    assertEquals(1, fakeExamRepo.getExamsCallCount)
+    assertEquals(1, fakeClassRepo.getClassCountCallCount)
+    assertEquals(0, fakeClassRepo.getClassesCallCount)
+
+    // 2. Verify forceRefresh = true cancels an older suspended request and prevents older request from resetting state
+    val deferredOld = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    fakeExamRepo.deferredExamsResult = deferredOld
+    fakeExamRepo.swallowCancellationIntoFailure = true // Simulate repository catching Exception and returning Result.failure(CancellationException)
+    homeViewModel.loadUserData(forceRefresh = true)
+    mainLooper.idle()
+    assertTrue(homeViewModel.uiState.value.isLoading)
+    assertEquals(2, fakeExamRepo.getExamsCallCount)
+
+    // Start a newer forceRefresh while deferredOld is still suspended
+    val deferredNew = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    fakeExamRepo.deferredExamsResult = deferredNew
+    homeViewModel.loadUserData(forceRefresh = true)
+    mainLooper.idle()
+    assertEquals(1, fakeExamRepo.cancelledRequestCount)
+    // Newer request must still own isLoading = true and have no error from cancelled older request
+    assertTrue(homeViewModel.uiState.value.isLoading)
+    assertNull(homeViewModel.uiState.value.errorMessage)
+    assertEquals(3, fakeExamRepo.getExamsCallCount)
+
+    // Complete newer request with 1 exam
+    deferredNew.complete(Result.success(listOf(exam1)))
+    fakeExamRepo.deferredExamsResult = null
+    fakeExamRepo.swallowCancellationIntoFailure = false
+    mainLooper.idle()
+    assertFalse(homeViewModel.uiState.value.isLoading)
+    assertNull(homeViewModel.uiState.value.errorMessage)
+    assertEquals(1, homeViewModel.uiState.value.examCount)
+    assertEquals(2, homeViewModel.uiState.value.classCount)
+
+    // 3. Verify CancellationException (both direct and wrapped in Result.failure) does NOT set errorMessage
+    fakeExamRepo.throwCancellation = true
+    homeViewModel.loadUserData(forceRefresh = true)
+    mainLooper.idle()
+    assertFalse(homeViewModel.uiState.value.isLoading)
+    assertNull(homeViewModel.uiState.value.errorMessage)
+
+    fakeExamRepo.swallowCancellationIntoFailure = true
+    homeViewModel.loadUserData(forceRefresh = true)
+    mainLooper.idle()
+    assertFalse(homeViewModel.uiState.value.isLoading)
+    assertNull(homeViewModel.uiState.value.errorMessage)
+
+    // 4. Verify subsequent refresh works after cancellation
+    fakeExamRepo.throwCancellation = false
+    fakeExamRepo.swallowCancellationIntoFailure = false
+    homeViewModel.loadUserData()
+    mainLooper.idle()
+    assertFalse(homeViewModel.uiState.value.isLoading)
+    assertNull(homeViewModel.uiState.value.errorMessage)
+    assertEquals(2, homeViewModel.uiState.value.examCount)
+
+    // 5. Verify account switching during the suspended class-fetch stage discards stale dashboard counts
+    val deferredClasses = kotlinx.coroutines.CompletableDeferred<Result<List<ClassRoom>>>()
+    fakeClassRepo.deferredClassesResult = deferredClasses
+    homeViewModel.loadUserData(forceRefresh = true)
+    mainLooper.idle()
+    // Exam stage completed synchronously, now suspended inside getClassesByExamId
+    assertTrue(homeViewModel.uiState.value.isLoading)
+
+    // Switch authenticated user without starting a newer loadUserData() request
+    fakeAuthRepo.customUserId = "user-switched"
+    deferredClasses.complete(Result.success(listOf(class1)))
+    fakeClassRepo.deferredClassesResult = null
+    mainLooper.idle()
+    assertFalse(homeViewModel.uiState.value.isLoading)
+    assertNull(homeViewModel.uiState.value.errorMessage)
+    assertEquals(0, homeViewModel.uiState.value.examCount)
+    assertEquals(0, homeViewModel.uiState.value.classCount)
+  }
+
+  @Test
+  fun `verify ExamViewModel loadExams request ownership cancellation and cross-account isolation`() = runTest {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    val examA = Exam(id = "exam-A", teacherId = "user-A", name = "Midterm Math", type = "Mid Term", date = "2026-10-01")
+    val examB1 = Exam(id = "exam-B1", teacherId = "user-B", name = "History Final", type = "Final", date = "2026-10-02")
+    val examB2 = Exam(id = "exam-B2", teacherId = "user-B", name = "Biology Quiz", type = "Mid Term", date = "2026-10-03")
+    val fakeExamRepo = FakeExamRepository(initialExams = listOf(examA))
+    val fakeAuthRepo = FakeAuthRepository(signedInUser = null, customUserId = "user-A") // Not signed in yet
+
+    // 1. Premature unauthenticated request is avoided
+    val examViewModel = ExamViewModel(fakeExamRepo, fakeAuthRepo)
+    mainLooper.idle()
+    assertEquals(0, fakeExamRepo.getExamsCallCount)
+    assertTrue(examViewModel.uiState.value.exams.isEmpty())
+    assertNull(examViewModel.uiState.value.errorMessage)
+
+    // 2. In-flight deduplication while suspended on CompletableDeferred
+    fakeAuthRepo.signIn("teacherA@school.edu", "password123")
+    val deferredInFlight = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    fakeExamRepo.deferredExamsResult = deferredInFlight
+    examViewModel.loadExams()
+    mainLooper.idle()
+    assertTrue(examViewModel.uiState.value.isLoading)
+    assertEquals(1, fakeExamRepo.getExamsCallCount)
+
+    // Duplicate non-forced call while suspended does not launch a second repository call
+    examViewModel.loadExams(forceRefresh = false)
+    mainLooper.idle()
+    assertEquals(1, fakeExamRepo.getExamsCallCount)
+
+    // Complete first request
+    deferredInFlight.complete(Result.success(listOf(examA)))
+    fakeExamRepo.deferredExamsResult = null
+    mainLooper.idle()
+    assertEquals(1, examViewModel.uiState.value.exams.size)
+    assertEquals("exam-A", examViewModel.uiState.value.exams.first().id)
+    assertFalse(examViewModel.uiState.value.isLoading)
+
+    // 3. Account switching while Teacher A's request is suspended (even when repository wraps CancellationException in Result.failure):
+    // Start a suspended refresh for Teacher A
+    val deferredTeacherA = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    fakeExamRepo.deferredExamsResult = deferredTeacherA
+    fakeExamRepo.swallowCancellationIntoFailure = true
+    examViewModel.loadExams(forceRefresh = true)
+    mainLooper.idle()
+    assertTrue(examViewModel.uiState.value.isLoading)
+
+    // Teacher A logs out (clearExams cancels deferredTeacherA) and Teacher B logs in and starts loading
+    examViewModel.clearExams()
+    mainLooper.idle()
+    assertEquals(1, fakeExamRepo.cancelledRequestCount)
+    assertFalse(examViewModel.uiState.value.isLoading)
+    assertTrue(examViewModel.uiState.value.exams.isEmpty())
+    assertNull(examViewModel.uiState.value.errorMessage)
+
+    // Teacher B signs in and starts a suspended load
+    fakeAuthRepo.customUserId = "user-B"
+    fakeAuthRepo.signIn("teacherB@school.edu", "password123")
+    val deferredTeacherB = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    fakeExamRepo.deferredExamsResult = deferredTeacherB
+    examViewModel.loadExams()
+    mainLooper.idle()
+    // Teacher B's request must still be loading and untainted by Teacher A's cancelled request
+    assertTrue(examViewModel.uiState.value.isLoading)
+    assertNull(examViewModel.uiState.value.errorMessage)
+
+    // Complete Teacher B's request
+    deferredTeacherB.complete(Result.success(listOf(examB1, examB2)))
+    fakeExamRepo.deferredExamsResult = null
+    fakeExamRepo.swallowCancellationIntoFailure = false
+    mainLooper.idle()
+    assertFalse(examViewModel.uiState.value.isLoading)
+    assertEquals(2, examViewModel.uiState.value.exams.size)
+    assertEquals("exam-B1", examViewModel.uiState.value.exams[0].id)
+
+    // 4a. Genuinely suspended account-mismatch branch (without starting a newer request or incrementing requestGeneration):
+    // Start a request for Teacher B and suspend it inside the repository
+    val deferredAccountMismatch = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    fakeExamRepo.deferredExamsResult = deferredAccountMismatch
+    examViewModel.loadExams(forceRefresh = true)
+    mainLooper.idle()
+    assertTrue(examViewModel.uiState.value.isLoading)
+
+    // Change authenticated user to Teacher C WITHOUT calling loadExams() or clearExams()
+    fakeAuthRepo.customUserId = "user-C"
+    // Complete Teacher B's suspended request while myGeneration == requestGeneration
+    deferredAccountMismatch.complete(Result.success(listOf(examB1, examB2)))
+    fakeExamRepo.deferredExamsResult = null
+    mainLooper.idle()
+    // Verify Teacher B's data is discarded by the user-ID mismatch check (ExamViewModel.kt:97-108)
+    assertFalse(examViewModel.uiState.value.isLoading)
+    assertTrue(examViewModel.uiState.value.exams.isEmpty())
+    assertNull(examViewModel.uiState.value.selectedExam)
+    assertNull(examViewModel.uiState.value.errorMessage)
+
+    // 4b. Force-refresh replacement across user switch:
+    val deferredStale = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    fakeExamRepo.deferredExamsResult = deferredStale
+    examViewModel.loadExams(forceRefresh = true)
+    mainLooper.idle()
+    assertTrue(examViewModel.uiState.value.isLoading)
+
+    val examC = Exam(id = "exam-C", teacherId = "user-C", name = "Chemistry Lab", type = "Final", date = "2026-10-04")
+    val deferredTeacherC = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    fakeExamRepo.deferredExamsResult = deferredTeacherC
+    examViewModel.loadExams(forceRefresh = true)
+    mainLooper.idle()
+    assertEquals(2, fakeExamRepo.cancelledRequestCount)
+
+    deferredTeacherC.complete(Result.success(listOf(examC)))
+    fakeExamRepo.deferredExamsResult = null
+    mainLooper.idle()
+    assertFalse(examViewModel.uiState.value.isLoading)
+    assertEquals(1, examViewModel.uiState.value.exams.size)
+    assertEquals("exam-C", examViewModel.uiState.value.exams.first().id)
+
+    // 5. Verify HomeViewModel.signOut failure when still authenticated, cancellation, and cleanup resilience:
+    val homeViewModel = HomeViewModel(
+      authRepository = fakeAuthRepo,
+      examRepository = fakeExamRepo,
+      onClearExamState = {
+        examViewModel.clearExams()
+        throw RuntimeException("Simulated cleanup exception")
+      },
+    )
+    mainLooper.idle()
+    assertEquals(1, homeViewModel.uiState.value.examCount)
+
+    // 5a. When signOut fails and user is still authenticated, keep user on screen, show error, reset isSigningOut
+    fakeAuthRepo.shouldFailSignOut = true
+    var signedOutCallbackInvoked = false
+    homeViewModel.signOut {
+      signedOutCallbackInvoked = true
+    }
+    mainLooper.idle()
+    assertFalse(signedOutCallbackInvoked)
+    assertFalse(homeViewModel.uiState.value.isSigningOut)
+    assertTrue(fakeAuthRepo.isUserSignedIn())
+    assertEquals("Sign out network error", homeViewModel.uiState.value.errorMessage)
+    assertEquals(1, homeViewModel.uiState.value.examCount)
+    assertEquals(1, examViewModel.uiState.value.exams.size)
+
+    // 5b. When signOut throws CancellationException, do not navigate to Login or show error
+    fakeAuthRepo.shouldFailSignOut = false
+    fakeAuthRepo.throwSignOutCancellation = true
+    homeViewModel.signOut {
+      signedOutCallbackInvoked = true
+    }
+    mainLooper.idle()
+    assertFalse(signedOutCallbackInvoked)
+    assertFalse(homeViewModel.uiState.value.isSigningOut)
+    assertTrue(fakeAuthRepo.isUserSignedIn())
+    assertNull(homeViewModel.uiState.value.errorMessage)
+    assertEquals(1, examViewModel.uiState.value.exams.size)
+
+    // 5c. When signOut succeeds, complete sign-out even if onClearExamState throws an exception
+    fakeAuthRepo.throwSignOutCancellation = false
+    homeViewModel.signOut {
+      signedOutCallbackInvoked = true
+    }
+    mainLooper.idle()
+    assertTrue(signedOutCallbackInvoked)
+    assertFalse(homeViewModel.uiState.value.isSigningOut)
+    assertFalse(fakeAuthRepo.isUserSignedIn())
+    assertTrue(examViewModel.uiState.value.exams.isEmpty())
+    assertEquals(0, homeViewModel.uiState.value.examCount)
+    assertEquals(0, homeViewModel.uiState.value.classCount)
+  }
+
+  @Test
+  fun `verify SupabaseClientProvider baseOkHttpClient and shared client configuration`() {
+    val baseClient = com.example.data.remote.SupabaseClientProvider.baseOkHttpClient
+    assertNotNull(baseClient)
+    assertEquals(30_000, baseClient.connectTimeoutMillis)
+    assertEquals(30_000, baseClient.readTimeoutMillis)
+    assertEquals(30_000, baseClient.writeTimeoutMillis)
+
+    // Verify derived clients share the exact same connectionPool and dispatcher
+    val derivedOcrClient = baseClient.newBuilder()
+      .connectTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
+      .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
+      .writeTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
+      .build()
+    org.junit.Assert.assertSame(baseClient.connectionPool, derivedOcrClient.connectionPool)
+    org.junit.Assert.assertSame(baseClient.dispatcher, derivedOcrClient.dispatcher)
+    assertEquals(45_000, derivedOcrClient.connectTimeoutMillis)
+
+    val fakeAuthRepo = FakeAuthRepository(signedInUser = "teacher@school.edu")
+    val ocrRepo = SupabaseOcrRepository(fakeAuthRepo)
+    assertNotNull(ocrRepo)
+
+    val studentRepo = SupabaseStudentRepository(fakeAuthRepo)
+    assertNotNull(studentRepo)
+
+    val fakeStudentRepo = FakeStudentRepository()
+    val fakeClassRepo = FakeClassRepository()
+    val fakePaperRepo = FakePaperRepository()
+    val detailViewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo)
+    assertNotNull(detailViewModel)
+  }
+
+  @Test
+  fun `verify Phase 3 StudentViewModel and StudentDetailViewModel concurrent loading and signed URL reuse`() = runTest {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    val classRoom = ClassRoom(
+      id = "class-1",
+      examId = "exam-1",
+      teacherId = "user-123",
+      session = "2026",
+      semester = "Fall",
+      timing = "Morning",
+      subjectName = "Physics",
+      totalMarks = 100,
+    )
+    val student1 = Student(id = "student-1", classId = "class-1", teacherId = "user-123", name = "Bob", fatherName = "Robert", rollNumber = "02")
+    val student2 = Student(id = "student-2", classId = "class-1", teacherId = "user-123", name = "Alice", fatherName = "Alan", rollNumber = "01")
+    val page1 = StudentPaperPage(id = "page-1", paperId = "paper-1", studentId = "student-1", teacherId = "user-123", pageNumber = 1, storagePath = "user-123/class-1/student-1/paper-1/page_1.jpg")
+    val paper1 = StudentPaper(id = "paper-1", studentId = "student-1", classId = "class-1", teacherId = "user-123", totalPages = 1, status = "scanned", pages = listOf(page1))
+
+    // 1. OPT-06: StudentViewModel.loadClassAndStudents runs getClassById and getStudentsByClassId concurrently
+    val deferredClass = kotlinx.coroutines.CompletableDeferred<Result<ClassRoom?>>()
+    val fakeClassRepo = FakeClassRepository(initialClasses = listOf(classRoom), deferredClassByIdResult = deferredClass)
+    val fakeStudentRepo = FakeStudentRepository(initialStudents = listOf(student1, student2))
+    val studentViewModel = StudentViewModel(fakeStudentRepo, fakeClassRepo)
+
+    studentViewModel.loadClassAndStudents("class-1")
+    mainLooper.idle()
+    // Even while getClassById is still suspended on deferredClass, getStudentsByClassId has already been invoked concurrently!
+    assertEquals(1, fakeClassRepo.getClassByIdCallCount)
+    assertEquals(1, fakeStudentRepo.getStudentsByClassIdCallCount)
+
+    deferredClass.complete(Result.success(classRoom))
+    fakeClassRepo.deferredClassByIdResult = null
+    mainLooper.idle()
+    assertFalse(studentViewModel.uiState.value.isLoading)
+    assertEquals("Physics", studentViewModel.uiState.value.classRoom?.subjectName)
+    assertEquals(listOf("01", "02"), studentViewModel.uiState.value.students.map { it.rollNumber })
+
+    // 2. OPT-05: StudentDetailViewModel.loadStudentAndPapers runs student/class and paper requests concurrently,
+    // and deduplicates/reuses in-flight and cached signed URLs
+    val deferredStudent = kotlinx.coroutines.CompletableDeferred<Result<Student?>>()
+    fakeStudentRepo.deferredStudentByIdResult = deferredStudent
+    val deferredSignedUrl = kotlinx.coroutines.CompletableDeferred<Result<String>>()
+    val fakePaperRepo = FakePaperRepository(initialPapers = listOf(paper1), deferredSignedUrlResult = deferredSignedUrl)
+    val detailViewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, fakePaperRepo)
+
+    detailViewModel.loadStudentAndPapers("student-1")
+    mainLooper.idle()
+    // While getStudentById is still suspended on deferredStudent, getPapersByStudentId has already been called concurrently!
+    assertEquals(1, fakeStudentRepo.getStudentByIdCallCount)
+    assertEquals(1, fakePaperRepo.getPapersCallCount)
+
+    deferredStudent.complete(Result.success(student1))
+    fakeStudentRepo.deferredStudentByIdResult = null
+    mainLooper.idle()
+    assertFalse(detailViewModel.uiState.value.isLoading)
+    assertEquals("Bob", detailViewModel.uiState.value.student?.name)
+    assertEquals("Physics", detailViewModel.uiState.value.classRoom?.subjectName)
+    assertEquals(1, detailViewModel.uiState.value.papers.size)
+
+    // Preload of page1.storagePath is currently suspended on deferredSignedUrl (call count == 1).
+    // Calling loadSignedUrlForPage again (as StudentDetailScreen LaunchedEffect does) while in-flight must reuse the in-flight request!
+    assertEquals(1, fakePaperRepo.getSignedPageUrlCallCount)
+    detailViewModel.loadSignedUrlForPage(page1.storagePath)
+    mainLooper.idle()
+    assertEquals(1, fakePaperRepo.getSignedPageUrlCallCount)
+
+    // Complete signed URL request and verify subsequent calls reuse cached signedUrls map
+    deferredSignedUrl.complete(Result.success("https://signed.url/${page1.storagePath}"))
+    fakePaperRepo.deferredSignedUrlResult = null
+    mainLooper.idle()
+    assertEquals("https://signed.url/${page1.storagePath}", detailViewModel.uiState.value.signedUrls[page1.storagePath])
+
+    detailViewModel.loadSignedUrlForPage(page1.storagePath)
+    mainLooper.idle()
+    assertEquals(1, fakePaperRepo.getSignedPageUrlCallCount)
+
+    // 3. Signed-URL retry after failure:
+    // Add a second page whose initial signed URL request fails, then verify a retry succeeds
+    val page2 = StudentPaperPage(id = "page-2", paperId = "paper-1", studentId = "student-1", teacherId = "user-123", pageNumber = 2, storagePath = "user-123/class-1/student-1/paper-1/page_2.jpg")
+    val paperWith2Pages = paper1.copy(totalPages = 2, pages = listOf(page1, page2))
+    val retryPaperRepo = FakePaperRepository(initialPapers = listOf(paperWith2Pages))
+    val retryDetailViewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, retryPaperRepo)
+    retryDetailViewModel.loadStudentAndPapers("student-1")
+    mainLooper.idle()
+    assertEquals(1, retryPaperRepo.getSignedPageUrlCallCount) // page1 preloaded
+
+    val deferredFailedUrl = kotlinx.coroutines.CompletableDeferred<Result<String>>()
+    retryPaperRepo.deferredSignedUrlResult = deferredFailedUrl
+    retryDetailViewModel.loadSignedUrlForPage(page2.storagePath)
+    mainLooper.idle()
+    assertEquals(2, retryPaperRepo.getSignedPageUrlCallCount)
+
+    deferredFailedUrl.complete(Result.failure(Exception("Temporary storage timeout")))
+    retryPaperRepo.deferredSignedUrlResult = null
+    mainLooper.idle()
+    assertNull(retryDetailViewModel.uiState.value.signedUrls[page2.storagePath])
+
+    // Retry for page2.storagePath must NOT be blocked by the previous failure
+    retryDetailViewModel.loadSignedUrlForPage(page2.storagePath)
+    mainLooper.idle()
+    assertEquals(3, retryPaperRepo.getSignedPageUrlCallCount)
+    assertEquals("https://signed.url/${page2.storagePath}", retryDetailViewModel.uiState.value.signedUrls[page2.storagePath])
+
+    // 4. In-flight signed-URL request completing AFTER page deletion cannot restore the deleted URL:
+    val page3 = StudentPaperPage(id = "page-3", paperId = "paper-1", studentId = "student-1", teacherId = "user-123", pageNumber = 3, storagePath = "user-123/class-1/student-1/paper-1/page_3.jpg")
+    val paperWith3Pages = paper1.copy(totalPages = 3, pages = listOf(page1, page2, page3))
+    val deleteRacePaperRepo = FakePaperRepository(
+      initialPapers = listOf(paperWith3Pages),
+      ignoreSignedUrlCancellation = true,
+    )
+    val deleteRaceViewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, deleteRacePaperRepo)
+    deleteRaceViewModel.loadStudentAndPapers("student-1")
+    mainLooper.idle()
+
+    val deferredDeletedPageUrl = kotlinx.coroutines.CompletableDeferred<Result<String>>()
+    deleteRacePaperRepo.deferredSignedUrlResult = deferredDeletedPageUrl
+    deleteRaceViewModel.loadSignedUrlForPage(page3.storagePath)
+    mainLooper.idle()
+    assertNull(deleteRaceViewModel.uiState.value.signedUrls[page3.storagePath])
+
+    // Delete page 3 while its signed-URL request is still suspended in-flight
+    deleteRaceViewModel.deletePaperPage(page3)
+    mainLooper.idle()
+    assertEquals(2, deleteRaceViewModel.uiState.value.papers.first().pages.size)
+    assertNull(deleteRaceViewModel.uiState.value.signedUrls[page3.storagePath])
+
+    // Even when the in-flight request resolves with a URL after page deletion, it must NOT be added back to signedUrls
+    deferredDeletedPageUrl.complete(Result.success("https://signed.url/${page3.storagePath}"))
+    deleteRacePaperRepo.deferredSignedUrlResult = null
+    mainLooper.idle()
+    assertNull(deleteRaceViewModel.uiState.value.signedUrls[page3.storagePath])
+
+    // 5. Stale overlapping loadStudentAndPapers cannot overwrite a newer student-detail result:
+    val stalePaper = StudentPaper(id = "paper-stale", studentId = "student-1", classId = "class-1", teacherId = "user-123", totalPages = 1, status = "scanned", pages = listOf(page1))
+    val freshPaper = StudentPaper(id = "paper-fresh", studentId = "student-1", classId = "class-1", teacherId = "user-123", totalPages = 2, status = "approved", pages = listOf(page1, page2))
+    val overlapPaperRepo = FakePaperRepository(
+      initialPapers = listOf(freshPaper),
+      ignoreCancellationOnDeferred = true,
+    )
+    val overlapDetailViewModel = StudentDetailViewModel(fakeStudentRepo, fakeClassRepo, overlapPaperRepo)
+
+    val deferredOldDetail = kotlinx.coroutines.CompletableDeferred<Result<List<StudentPaper>>>()
+    overlapPaperRepo.deferredPapersResult = deferredOldDetail
+    overlapDetailViewModel.loadStudentAndPapers("student-1")
+    mainLooper.idle()
+    assertTrue(overlapDetailViewModel.uiState.value.isLoading)
+
+    val deferredNewDetail = kotlinx.coroutines.CompletableDeferred<Result<List<StudentPaper>>>()
+    overlapPaperRepo.deferredPapersResult = deferredNewDetail
+    overlapDetailViewModel.loadStudentAndPapers("student-1")
+    mainLooper.idle()
+    assertTrue(overlapDetailViewModel.uiState.value.isLoading)
+    assertNull(overlapDetailViewModel.uiState.value.errorMessage)
+
+    // Complete newer request first
+    deferredNewDetail.complete(Result.success(listOf(freshPaper)))
+    overlapPaperRepo.deferredPapersResult = null
+    mainLooper.idle()
+    assertFalse(overlapDetailViewModel.uiState.value.isLoading)
+    assertEquals(listOf("paper-fresh"), overlapDetailViewModel.uiState.value.papers.map { it.id })
+
+    // Now complete older request with stale data; it must NOT overwrite the newer papers list
+    deferredOldDetail.complete(Result.success(listOf(stalePaper)))
+    mainLooper.idle()
+    assertFalse(overlapDetailViewModel.uiState.value.isLoading)
+    assertNull(overlapDetailViewModel.uiState.value.errorMessage)
+    assertEquals(listOf("paper-fresh"), overlapDetailViewModel.uiState.value.papers.map { it.id })
+
+    // 6. Stale overlapping loadClassAndStudents cannot overwrite a newer class/student result:
+    val overlapStudentRepo = FakeStudentRepository(
+      initialStudents = listOf(student1, student2),
+      ignoreCancellationOnDeferred = true,
+    )
+    val overlapStudentViewModel = StudentViewModel(overlapStudentRepo, fakeClassRepo)
+
+    val deferredOldStudents = kotlinx.coroutines.CompletableDeferred<Result<List<Student>>>()
+    overlapStudentRepo.deferredStudentsByClassIdResult = deferredOldStudents
+    overlapStudentViewModel.loadClassAndStudents("class-1")
+    mainLooper.idle()
+    assertTrue(overlapStudentViewModel.uiState.value.isLoading)
+
+    val deferredNewStudents = kotlinx.coroutines.CompletableDeferred<Result<List<Student>>>()
+    overlapStudentRepo.deferredStudentsByClassIdResult = deferredNewStudents
+    overlapStudentViewModel.loadClassAndStudents("class-1")
+    mainLooper.idle()
+    assertTrue(overlapStudentViewModel.uiState.value.isLoading)
+    assertNull(overlapStudentViewModel.uiState.value.errorMessage)
+
+    // Complete newer request first with both students
+    deferredNewStudents.complete(Result.success(listOf(student2, student1)))
+    overlapStudentRepo.deferredStudentsByClassIdResult = null
+    mainLooper.idle()
+    assertFalse(overlapStudentViewModel.uiState.value.isLoading)
+    assertEquals(listOf("01", "02"), overlapStudentViewModel.uiState.value.students.map { it.rollNumber })
+
+    // Now complete older request with only 1 stale student; it must NOT overwrite the newer student list
+    deferredOldStudents.complete(Result.success(listOf(student1)))
+    mainLooper.idle()
+    assertFalse(overlapStudentViewModel.uiState.value.isLoading)
+    assertNull(overlapStudentViewModel.uiState.value.errorMessage)
+    assertEquals(listOf("01", "02"), overlapStudentViewModel.uiState.value.students.map { it.rollNumber })
+
+    // 7. Cancellation (direct or wrapped in Result.failure) does not become a normal UI error in either ViewModel:
+    overlapPaperRepo.ignoreCancellationOnDeferred = false
+    overlapPaperRepo.throwCancellation = true
+    overlapPaperRepo.swallowCancellationIntoFailure = false
+    overlapDetailViewModel.loadStudentAndPapers("student-1")
+    mainLooper.idle()
+    assertFalse(overlapDetailViewModel.uiState.value.isLoading)
+    assertNull(overlapDetailViewModel.uiState.value.errorMessage)
+
+    overlapPaperRepo.swallowCancellationIntoFailure = true
+    overlapDetailViewModel.loadStudentAndPapers("student-1")
+    mainLooper.idle()
+    assertFalse(overlapDetailViewModel.uiState.value.isLoading)
+    assertNull(overlapDetailViewModel.uiState.value.errorMessage)
+
+    overlapStudentRepo.ignoreCancellationOnDeferred = false
+    overlapStudentRepo.throwCancellation = true
+    overlapStudentRepo.swallowCancellationIntoFailure = false
+    overlapStudentViewModel.loadClassAndStudents("class-1")
+    mainLooper.idle()
+    assertFalse(overlapStudentViewModel.uiState.value.isLoading)
+    assertNull(overlapStudentViewModel.uiState.value.errorMessage)
+
+    overlapStudentRepo.swallowCancellationIntoFailure = true
+    overlapStudentViewModel.loadClassAndStudents("class-1")
+    mainLooper.idle()
+    assertFalse(overlapStudentViewModel.uiState.value.isLoading)
+    assertNull(overlapStudentViewModel.uiState.value.errorMessage)
+  }
+
+  @Test
+  fun `verify StorageCleanupHelper deleteFromBucket detects silent RLS no-op delete and rethrows CancellationException`() = runTest {
+    val objectsInStorage = mutableSetOf<String>()
+    var silentRlsNoOpDelete = false
+    val undeletablePaths = mutableSetOf<String>()
+    var throwCancelOnDelete = false
+    var throwCancelOnExists = false
+    val deleteBatches = mutableListOf<List<String>>()
+    val verifiedPaths = mutableListOf<String>()
+
+    val fakeBucketApi = java.lang.reflect.Proxy.newProxyInstance(
+      io.github.jan.supabase.storage.BucketApi::class.java.classLoader,
+      arrayOf(io.github.jan.supabase.storage.BucketApi::class.java),
+    ) { _, method, args ->
+      when (method.name) {
+        "delete" -> {
+          if (throwCancelOnDelete) {
+            throw kotlinx.coroutines.CancellationException("Cancelled during bucket.delete")
+          }
+          @Suppress("UNCHECKED_CAST")
+          val pathsArg = (args?.firstOrNull() as? Collection<String>)?.toList().orEmpty()
+          deleteBatches.add(pathsArg)
+          if (!silentRlsNoOpDelete) {
+            for (path in pathsArg) {
+              if (path !in undeletablePaths) {
+                objectsInStorage.remove(path)
+              }
+            }
+          }
+          // BucketApi.delete returns Unit even when Supabase Storage returns HTTP 200 [] under RLS block
+          Unit
+        }
+        "exists" -> {
+          if (throwCancelOnExists) {
+            throw kotlinx.coroutines.CancellationException("Cancelled during bucket.exists")
+          }
+          val pathArg = args?.firstOrNull() as? String ?: ""
+          verifiedPaths.add(pathArg)
+          objectsInStorage.contains(pathArg)
+        }
+        else -> throw UnsupportedOperationException("Unexpected BucketApi call: ${method.name}")
+      }
+    } as io.github.jan.supabase.storage.BucketApi
+
+    // 1. Silent RLS no-op delete: bucket.delete returns Unit without throwing, but object still exists in Storage
+    val targetPath = "user-123/exam-1/question_paper.jpg"
+    objectsInStorage.add(targetPath)
+    silentRlsNoOpDelete = true
+
+    val silentNoOpResult = runCatching {
+      com.example.data.repository.StorageCleanupHelper.deleteFromBucket(
+        bucketName = "question-papers",
+        rawPaths = listOf(targetPath),
+        bucketApi = fakeBucketApi,
+      )
+    }
+    assertTrue(silentNoOpResult.isFailure)
+    val silentNoOpError = silentNoOpResult.exceptionOrNull()
+    assertTrue(silentNoOpError is IllegalStateException)
+    assertTrue(silentNoOpError?.message?.contains("question-papers") == true)
+    assertTrue(silentNoOpError?.message?.contains(targetPath) == true)
+    assertTrue(objectsInStorage.contains(targetPath))
+
+    // 2. Partial silent failure in a multi-file batch: 1st file deleted, 2nd file blocked by RLS
+    objectsInStorage.clear()
+    deleteBatches.clear()
+    verifiedPaths.clear()
+    silentRlsNoOpDelete = false
+    val page1Path = "user-123/class-1/student-1/paper-1/page_1.jpg"
+    val page2Path = "user-123/class-1/student-1/paper-1/page_2.jpg"
+    objectsInStorage.addAll(listOf(page1Path, page2Path))
+    undeletablePaths.add(page2Path)
+
+    val partialFailureResult = runCatching {
+      com.example.data.repository.StorageCleanupHelper.deleteFromBucket(
+        bucketName = "student-papers",
+        rawPaths = listOf(page1Path, page2Path),
+        bucketApi = fakeBucketApi,
+      )
+    }
+    assertTrue(partialFailureResult.isFailure)
+    assertTrue(partialFailureResult.exceptionOrNull() is IllegalStateException)
+    assertTrue(partialFailureResult.exceptionOrNull()?.message?.contains(page2Path) == true)
+
+    // 3. Successful deletion across >100 paths (batching, normalization, and post-delete verification)
+    objectsInStorage.clear()
+    undeletablePaths.clear()
+    deleteBatches.clear()
+    verifiedPaths.clear()
+    val manyRawPaths = (1..105).map { idx ->
+      "/student-papers/user-123/class-1/student-1/paper-1/page_$idx.jpg"
+    }
+    val expectedNormalized = (1..105).map { idx ->
+      "user-123/class-1/student-1/paper-1/page_$idx.jpg"
+    }
+    objectsInStorage.addAll(expectedNormalized)
+
+    val batchSuccessResult = runCatching {
+      com.example.data.repository.StorageCleanupHelper.deleteFromBucket(
+        bucketName = "student-papers",
+        rawPaths = manyRawPaths + listOf("  ", null, expectedNormalized.first()),
+        bucketApi = fakeBucketApi,
+      )
+    }
+    assertTrue(batchSuccessResult.isSuccess)
+    assertEquals(2, deleteBatches.size)
+    assertEquals(100, deleteBatches[0].size)
+    assertEquals(5, deleteBatches[1].size)
+    assertEquals(expectedNormalized, verifiedPaths)
+    assertTrue(objectsInStorage.isEmpty())
+
+    // 4. CancellationException during bucket.delete is rethrown directly (not wrapped in IllegalStateException)
+    throwCancelOnDelete = true
+    val cancelDeleteResult = runCatching {
+      com.example.data.repository.StorageCleanupHelper.deleteFromBucket(
+        bucketName = "student-papers",
+        rawPaths = listOf(page1Path),
+        bucketApi = fakeBucketApi,
+      )
+    }
+    assertTrue(cancelDeleteResult.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+
+    // 5. CancellationException during bucket.exists verification is rethrown directly (not wrapped in IllegalStateException)
+    throwCancelOnDelete = false
+    throwCancelOnExists = true
+    val cancelExistsResult = runCatching {
+      com.example.data.repository.StorageCleanupHelper.deleteFromBucket(
+        bucketName = "student-papers",
+        rawPaths = listOf(page1Path),
+        bucketApi = fakeBucketApi,
+      )
+    }
+    assertTrue(cancelExistsResult.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+  }
+
+  @Test
+  fun `verify Phase 4 loadExistingEvaluationForPaper distinguishes outcomes stops on lookup failure propagates cancellation and reuses saved evaluations`() = runTest {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    fun waitForCondition(condition: () -> Boolean) {
+      val deadline = System.currentTimeMillis() + 5_000L
+      while (System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (condition()) return
+        Thread.sleep(10)
+      }
+      mainLooper.idle()
+    }
+
+    val student = Student(
+      id = "student-eval-1",
+      classId = "class-eval-1",
+      teacherId = "teacher-1",
+      name = "Amina Khan",
+      fatherName = "Tariq Khan",
+      rollNumber = "12",
+    )
+    val classRoom = ClassRoom(
+      id = "class-eval-1",
+      examId = "exam-eval-1",
+      teacherId = "teacher-1",
+      session = "2026",
+      semester = "Fall",
+      timing = "Morning",
+      subjectName = "Chemistry",
+      totalMarks = 20,
+    )
+    val scannedPaper = StudentPaper(
+      id = "paper-eval-1",
+      studentId = "student-eval-1",
+      classId = "class-eval-1",
+      teacherId = "teacher-1",
+      totalPages = 1,
+      status = "scanned",
+    )
+
+    fun makeDbEvaluation(
+      paperId: String,
+      status: String,
+      reviewRequired: Boolean = status == "needs_review",
+    ): Pair<com.example.data.model.EvaluationDbRecord, List<com.example.data.model.QuestionDbRecord>> {
+      val evalRecord = com.example.data.model.EvaluationDbRecord(
+        id = "eval-$paperId-$status",
+        paperId = paperId,
+        studentId = "student-eval-1",
+        classId = "class-eval-1",
+        teacherId = "teacher-1",
+        status = status,
+        totalMarksObtained = 16.0,
+        totalMarks = 20.0,
+        percentage = 80.0,
+        reviewRequired = reviewRequired,
+        reviewReason = if (reviewRequired) "Low confidence on Q2" else null,
+      )
+      val questions = listOf(
+        com.example.data.model.QuestionDbRecord(
+          id = "q-2",
+          evaluationId = evalRecord.id,
+          questionNumber = "2",
+          questionText = "Explain covalent bonding.",
+          maximumMarks = 10.0,
+          studentAnswer = "Sharing of electron pairs",
+          expectedAnswer = "Sharing of electrons between atoms",
+          markingCriteria = "Full marks for electron sharing",
+          awardedMarks = 8.0,
+          feedback = "Good explanation",
+        ),
+        com.example.data.model.QuestionDbRecord(
+          id = "q-1",
+          evaluationId = evalRecord.id,
+          questionNumber = "1",
+          questionText = "Define atomic number.",
+          maximumMarks = 10.0,
+          studentAnswer = "Number of protons in nucleus",
+          expectedAnswer = "Number of protons",
+          markingCriteria = "10 marks for correct definition",
+          awardedMarks = 8.0,
+          feedback = "Correct",
+        ),
+      )
+      return evalRecord to questions
+    }
+
+    var edgeFunctionCallCount = 0
+    var lookupCallCount = 0
+    var lookupMode: String = "not_found"
+    var suspendedLookupDeferred: kotlinx.coroutines.CompletableDeferred<Pair<com.example.data.model.EvaluationDbRecord, List<com.example.data.model.QuestionDbRecord>>?>? = null
+
+    val mockEdgeClient = okhttp3.OkHttpClient.Builder()
+      .addInterceptor { chain ->
+        edgeFunctionCallCount++
+        val responseJson = """
+          {
+            "status": "completed",
+            "percentageAvailable": true,
+            "evaluation": {
+              "id": "eval-from-edge",
+              "paperId": "paper-eval-1",
+              "studentId": "student-eval-1",
+              "classId": "class-eval-1",
+              "teacherId": "teacher-1",
+              "status": "completed",
+              "totalMarksObtained": 18.0,
+              "totalMarks": 20.0,
+              "percentage": 90.0,
+              "reviewRequired": false,
+              "questions": [
+                {
+                  "id": "q-edge-1",
+                  "evaluation_id": "eval-from-edge",
+                  "question_number": "1",
+                  "question_text": "Define atomic number.",
+                  "maximum_marks": 20.0,
+                  "student_answer": "Number of protons",
+                  "awarded_marks": 18.0,
+                  "feedback": "Well done"
+                }
+              ]
+            }
+          }
+        """.trimIndent()
+        okhttp3.Response.Builder()
+          .request(chain.request())
+          .protocol(okhttp3.Protocol.HTTP_1_1)
+          .code(200)
+          .message("OK")
+          .body(with(okhttp3.ResponseBody) { responseJson.toResponseBody(null) })
+          .build()
+      }
+      .build()
+
+    val fakeStudentRepo = FakeStudentRepository(listOf(student))
+    val fakeClassRepo = FakeClassRepository(listOf(classRoom))
+    val fakePaperRepo = FakePaperRepository(listOf(scannedPaper))
+
+    val viewModel = StudentDetailViewModel(
+      studentRepository = fakeStudentRepo,
+      classRepository = fakeClassRepo,
+      paperRepository = fakePaperRepo,
+      evaluationHttpClient = mockEdgeClient,
+      existingEvaluationDbFetcher = { paperId ->
+        lookupCallCount++
+        suspendedLookupDeferred?.await()
+        when (lookupMode) {
+          "found_completed" -> makeDbEvaluation(paperId, "completed")
+          "found_needs_review" -> makeDbEvaluation(paperId, "needs_review")
+          "found_approved" -> makeDbEvaluation(paperId, "approved", reviewRequired = false)
+          "not_found" -> null
+          "db_failure" -> throw java.io.IOException("Database connection reset while querying student_paper_evaluations")
+          "throw_cancellation" -> throw kotlinx.coroutines.CancellationException("Lookup coroutine cancelled")
+          else -> null
+        }
+      },
+      evaluationAccessTokenProvider = { "test-teacher-jwt-token" },
+    )
+
+    viewModel.loadStudentAndPapers("student-eval-1")
+    mainLooper.idle()
+
+    // 1. Direct unit verification of loadExistingEvaluationForPaper() outcomes:
+    // 1a. Evaluation exists -> Found (with questions sorted numerically Q1, Q2)
+    lookupMode = "found_completed"
+    val foundOutcome = viewModel.loadExistingEvaluationForPaper("paper-eval-1")
+    assertTrue(foundOutcome is StudentDetailViewModel.ExistingEvaluationLookupResult.Found)
+    val foundResp = (foundOutcome as StudentDetailViewModel.ExistingEvaluationLookupResult.Found).response
+    assertEquals("completed", foundResp.status)
+    assertEquals(listOf("1", "2"), foundResp.evaluation?.questions?.map { it.questionNumber })
+
+    // 1b. No evaluation exists -> NotFound
+    lookupMode = "not_found"
+    val notFoundOutcome = viewModel.loadExistingEvaluationForPaper("paper-eval-1")
+    assertTrue(notFoundOutcome is StudentDetailViewModel.ExistingEvaluationLookupResult.NotFound)
+
+    // 1c. Database lookup fails -> Failed (not NotFound)
+    lookupMode = "db_failure"
+    val failedOutcome = viewModel.loadExistingEvaluationForPaper("paper-eval-1")
+    assertTrue(failedOutcome is StudentDetailViewModel.ExistingEvaluationLookupResult.Failed)
+    assertTrue(
+      (failedOutcome as StudentDetailViewModel.ExistingEvaluationLookupResult.Failed)
+        .error.message?.contains("Database connection reset") == true
+    )
+
+    // 1d. CancellationException is rethrown directly (never converted into NotFound or Failed)
+    lookupMode = "throw_cancellation"
+    val cancelOutcome = runCatching {
+      viewModel.loadExistingEvaluationForPaper("paper-eval-1")
+    }
+    assertTrue(cancelOutcome.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+
+    // 2. Database lookup failure during runAiEvaluation():
+    // Must stop runAiEvaluation(), report an error, and MUST NOT call the AI Edge Function
+    edgeFunctionCallCount = 0
+    lookupCallCount = 0
+    lookupMode = "db_failure"
+    viewModel.runAiEvaluation("paper-eval-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && lookupCallCount == 1 }
+
+    assertEquals(1, lookupCallCount)
+    assertEquals(0, edgeFunctionCallCount)
+    assertNull(viewModel.uiState.value.isEvaluatingPaperId)
+    assertNull(viewModel.uiState.value.evaluationResult)
+    assertNull(viewModel.uiState.value.pendingReviewNavigationPaperId)
+    assertNotNull(viewModel.uiState.value.evaluationError)
+    assertTrue(viewModel.uiState.value.evaluationError!!.contains("Database connection reset"))
+
+    // 3. Cancellation during existing-evaluation lookup:
+    // 3a. Direct CancellationException from lookup propagates without calling AI Edge Function or setting evaluationError
+    viewModel.dismissEvaluationDialog()
+    edgeFunctionCallCount = 0
+    lookupCallCount = 0
+    lookupMode = "throw_cancellation"
+    viewModel.runAiEvaluation("paper-eval-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && lookupCallCount == 1 }
+
+    assertEquals(1, lookupCallCount)
+    assertEquals(0, edgeFunctionCallCount)
+    assertNull(viewModel.uiState.value.isEvaluatingPaperId)
+    assertNull(viewModel.uiState.value.evaluationError)
+    assertNull(viewModel.uiState.value.evaluationResult)
+    assertNull(viewModel.uiState.value.pendingReviewNavigationPaperId)
+
+    // 3b. In-flight lookup cancelled via stopAiEvaluation() while suspended does not fall through to Edge Function
+    edgeFunctionCallCount = 0
+    lookupCallCount = 0
+    lookupMode = "not_found"
+    val inFlightLookup = kotlinx.coroutines.CompletableDeferred<Pair<com.example.data.model.EvaluationDbRecord, List<com.example.data.model.QuestionDbRecord>>?>()
+    suspendedLookupDeferred = inFlightLookup
+    viewModel.runAiEvaluation("paper-eval-1")
+    waitForCondition { lookupCallCount == 1 }
+    assertEquals("paper-eval-1", viewModel.uiState.value.isEvaluatingPaperId)
+
+    viewModel.stopAiEvaluation("paper-eval-1")
+    inFlightLookup.complete(null)
+    suspendedLookupDeferred = null
+    Thread.sleep(50)
+    mainLooper.idle()
+
+    assertNull(viewModel.uiState.value.isEvaluatingPaperId)
+    assertNull(viewModel.uiState.value.evaluationError)
+    assertEquals(0, edgeFunctionCallCount)
+
+    // 4. Existing saved evaluations ('completed', 'needs_review', 'approved') are reused without calling Edge Function:
+    // 4a. 'completed' saved evaluation reused
+    viewModel.dismissEvaluationDialog()
+    edgeFunctionCallCount = 0
+    lookupCallCount = 0
+    lookupMode = "found_completed"
+    viewModel.runAiEvaluation("paper-eval-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && viewModel.uiState.value.evaluationResult != null }
+
+    assertEquals(1, lookupCallCount)
+    assertEquals(0, edgeFunctionCallCount)
+    assertEquals("completed", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals("paper-eval-1", viewModel.uiState.value.pendingReviewNavigationPaperId)
+    assertNull(viewModel.uiState.value.evaluationError)
+
+    // 4b. 'needs_review' saved evaluation reused
+    viewModel.dismissEvaluationDialog()
+    lookupCallCount = 0
+    lookupMode = "found_needs_review"
+    viewModel.runAiEvaluation("paper-eval-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && viewModel.uiState.value.evaluationResult != null }
+
+    assertEquals(1, lookupCallCount)
+    assertEquals(0, edgeFunctionCallCount)
+    assertEquals("needs_review", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals("paper-eval-1", viewModel.uiState.value.pendingReviewNavigationPaperId)
+
+    // 4c. 'approved' saved evaluation reused and clears any editedQuestions
+    viewModel.dismissEvaluationDialog()
+    lookupCallCount = 0
+    lookupMode = "found_approved"
+    viewModel.runAiEvaluation("paper-eval-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && viewModel.uiState.value.evaluationResult != null }
+
+    assertEquals(1, lookupCallCount)
+    assertEquals(0, edgeFunctionCallCount)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertNull(viewModel.uiState.value.editedQuestions)
+    assertEquals("paper-eval-1", viewModel.uiState.value.pendingReviewNavigationPaperId)
+
+    // 5. Genuinely missing evaluation (NotFound) proceeds with the normal AI Edge Function evaluation flow:
+    viewModel.dismissEvaluationDialog()
+    edgeFunctionCallCount = 0
+    lookupCallCount = 0
+    lookupMode = "not_found"
+    viewModel.runAiEvaluation("paper-eval-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && edgeFunctionCallCount == 1 }
+
+    assertEquals(1, lookupCallCount)
+    assertEquals(1, edgeFunctionCallCount)
+    assertNull(viewModel.uiState.value.isEvaluatingPaperId)
+    assertNull(viewModel.uiState.value.evaluationError)
+    assertEquals("eval-from-edge", viewModel.uiState.value.evaluationResult?.evaluation?.id)
+    assertEquals(18.0, viewModel.uiState.value.evaluationResult?.evaluation?.totalMarksObtained ?: 0.0, 0.001)
+    assertEquals("paper-eval-1", viewModel.uiState.value.pendingReviewNavigationPaperId)
+  }
+
+  @Test
+  fun `verify Phase 4 approval and saving safety guards cancellation status preservation and stale paper protection`() = runTest {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+
+    fun waitForCondition(timeoutMs: Long = 3000L, condition: () -> Boolean) {
+      val deadline = System.currentTimeMillis() + timeoutMs
+      while (System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (condition()) return
+        Thread.sleep(10)
+      }
+      mainLooper.idle()
+    }
+
+    val student = Student(
+      id = "s-safe-1",
+      classId = "c-safe-1",
+      teacherId = "t-safe-1",
+      name = "Amina Khan",
+      fatherName = "Tariq Khan",
+      rollNumber = "12",
+    )
+    val classRoom = ClassRoom(
+      id = "c-safe-1",
+      examId = "e-safe-1",
+      teacherId = "t-safe-1",
+      session = "2024-2028",
+      semester = "2nd",
+      timing = "Morning",
+      subjectName = "Chemistry",
+      totalMarks = 20,
+    )
+    val paper1 = StudentPaper(
+      id = "paper-safe-1",
+      studentId = "s-safe-1",
+      classId = "c-safe-1",
+      teacherId = "t-safe-1",
+      totalPages = 1,
+      status = "needs_review",
+      evaluation = EvaluationStatus(status = "needs_review"),
+    )
+    val paper2 = StudentPaper(
+      id = "paper-safe-2",
+      studentId = "s-safe-1",
+      classId = "c-safe-1",
+      teacherId = "t-safe-1",
+      totalPages = 1,
+      status = "needs_review",
+      evaluation = EvaluationStatus(status = "needs_review"),
+    )
+
+    fun buildEvalResponse(
+      evalId: String,
+      paperId: String,
+      status: String = "needs_review",
+      reviewRequired: Boolean = true,
+      q1Marks: Double = 8.0,
+      q2Marks: Double = 7.0,
+    ): AiEvaluationResponse {
+      val totalObtained = q1Marks + q2Marks
+      return AiEvaluationResponse(
+        status = status,
+        percentageAvailable = true,
+        evaluation = EvaluationDetail(
+          id = evalId,
+          paperId = paperId,
+          studentId = "s-safe-1",
+          classId = "c-safe-1",
+          teacherId = "t-safe-1",
+          status = status,
+          totalMarksObtained = totalObtained,
+          totalMarks = 20.0,
+          extractedQuestionTotalMarks = 20.0,
+          percentage = (totalObtained / 20.0) * 100.0,
+          percentageAvailable = true,
+          reviewRequired = reviewRequired,
+          questions = listOf(
+            EvaluationQuestion(
+              id = "$evalId-q1",
+              evaluationId = evalId,
+              questionNumber = "1",
+              questionText = "Question 1",
+              maximumMarks = 10.0,
+              studentAnswer = "Answer 1",
+              awardedMarks = q1Marks,
+              feedback = "Feedback 1",
+            ),
+            EvaluationQuestion(
+              id = "$evalId-q2",
+              evaluationId = evalId,
+              questionNumber = "2",
+              questionText = "Question 2",
+              maximumMarks = 10.0,
+              studentAnswer = "Answer 2",
+              awardedMarks = q2Marks,
+              feedback = "Feedback 2",
+            ),
+          ),
+        ),
+      )
+    }
+
+    var approvalCallCount = 0
+    val approvalCalls = mutableListOf<Pair<String, String>>()
+    var pendingApprovalDeferred: kotlinx.coroutines.CompletableDeferred<Result<Unit>>? = null
+    var throwCancelOnApprove = false
+
+    var saveCallCount = 0
+    val saveCalls = mutableListOf<Pair<String, String>>()
+    var pendingSaveDeferred: kotlinx.coroutines.CompletableDeferred<Result<AiEvaluationResponse>>? = null
+    var throwCancelOnSave = false
+
+    var dbEvalStatus = "needs_review"
+    var dbReviewRequired = true
+    var pendingDbLookupDeferred: kotlinx.coroutines.CompletableDeferred<Pair<com.example.data.model.EvaluationDbRecord, List<com.example.data.model.QuestionDbRecord>>?>? = null
+
+    val fakeStudentRepository = FakeStudentRepository(listOf(student))
+    val fakeClassRepository = FakeClassRepository(listOf(classRoom))
+    val fakePaperRepository = FakePaperRepository(listOf(paper1, paper2))
+
+    val viewModel = StudentDetailViewModel(
+      studentRepository = fakeStudentRepository,
+      classRepository = fakeClassRepository,
+      paperRepository = fakePaperRepository,
+      ocrRepository = FakeOcrRepository(),
+      approveEvaluationAction = { evalId, pId ->
+        approvalCallCount++
+        approvalCalls.add(evalId to pId)
+        if (throwCancelOnApprove) {
+          throw kotlinx.coroutines.CancellationException("Approval coroutine cancelled")
+        }
+        val deferred = pendingApprovalDeferred
+        if (deferred != null) {
+          deferred.await()
+        } else {
+          Result.success(Unit)
+        }
+      },
+      existingEvaluationDbFetcher = { pId ->
+        val deferred = pendingDbLookupDeferred
+        if (deferred != null) {
+          deferred.await()
+        } else {
+          com.example.data.model.EvaluationDbRecord(
+            id = "eval-db-$pId",
+            paperId = pId,
+            studentId = "s-safe-1",
+            classId = "c-safe-1",
+            teacherId = "t-safe-1",
+            status = dbEvalStatus,
+            totalMarksObtained = 15.0,
+            totalMarks = 20.0,
+            percentage = 75.0,
+            reviewRequired = dbReviewRequired,
+            reviewReason = if (dbReviewRequired) "Low confidence" else null,
+          ) to listOf(
+            com.example.data.model.QuestionDbRecord(
+              id = "q-db-1",
+              evaluationId = "eval-db-$pId",
+              questionNumber = "1",
+              questionText = "Q1",
+              maximumMarks = 10.0,
+              studentAnswer = "A1",
+              awardedMarks = 8.0,
+              feedback = "Good",
+              reviewRequired = dbReviewRequired,
+            ),
+            com.example.data.model.QuestionDbRecord(
+              id = "q-db-2",
+              evaluationId = "eval-db-$pId",
+              questionNumber = "2",
+              questionText = "Q2",
+              maximumMarks = 10.0,
+              studentAnswer = "A2",
+              awardedMarks = 7.0,
+              feedback = "Fair",
+              reviewRequired = false,
+            ),
+          )
+        }
+      },
+      saveTeacherCorrectionsAction = { evalId, pId ->
+        saveCallCount++
+        saveCalls.add(evalId to pId)
+        if (throwCancelOnSave) {
+          throw kotlinx.coroutines.CancellationException("Save coroutine cancelled")
+        }
+        val deferred = pendingSaveDeferred
+        if (deferred != null) {
+          deferred.await()
+        } else {
+          Result.success(buildEvalResponse(evalId, pId, status = "needs_review", reviewRequired = true, q1Marks = 9.0, q2Marks = 7.0))
+        }
+      },
+    )
+
+    viewModel.loadStudentAndPapers("s-safe-1")
+    waitForCondition { !viewModel.uiState.value.isLoading && viewModel.uiState.value.papers.size == 2 }
+    assertEquals(1, fakeStudentRepository.getStudentByIdCallCount)
+    assertEquals(1, fakeClassRepository.getClassByIdCallCount)
+    assertEquals(1, fakePaperRepository.getPapersCallCount)
+    assertEquals(0, fakePaperRepository.getSignedPageUrlCallCount)
+
+    // 1. Rapid duplicate save calls result in only one save operation
+    viewModel.setEvaluationResultForTesting("paper-safe-1", buildEvalResponse("eval-safe-1", "paper-safe-1"))
+    viewModel.onUpdateQuestion("eval-safe-1-q1", "1", 9.0, "Updated Q1")
+    assertNotNull(viewModel.uiState.value.editedQuestions)
+
+    val saveGate = kotlinx.coroutines.CompletableDeferred<Result<AiEvaluationResponse>>()
+    pendingSaveDeferred = saveGate
+
+    viewModel.saveTeacherCorrections("eval-safe-1", "paper-safe-1")
+    viewModel.saveTeacherCorrections("eval-safe-1", "paper-safe-1")
+    viewModel.saveTeacherCorrections("eval-safe-1", "paper-safe-1")
+    assertTrue(viewModel.uiState.value.isSavingCorrections)
+
+    waitForCondition { saveCallCount == 1 }
+    assertEquals(1, saveCallCount)
+
+    saveGate.complete(
+      Result.success(
+        buildEvalResponse("eval-safe-1", "paper-safe-1", status = "needs_review", reviewRequired = true, q1Marks = 9.0, q2Marks = 7.0)
+      )
+    )
+    pendingSaveDeferred = null
+    waitForCondition { !viewModel.uiState.value.isSavingCorrections }
+
+    assertEquals(1, saveCallCount)
+    assertTrue(viewModel.uiState.value.saveCorrectionsSuccess)
+    assertNull(viewModel.uiState.value.saveCorrectionsError)
+    assertNull(viewModel.uiState.value.editedQuestions)
+    assertEquals(9.0, viewModel.uiState.value.evaluationResult?.evaluation?.questions?.first()?.awardedMarks ?: 0.0, 0.001)
+
+    // 2. Rapid duplicate approval calls result in only one approval operation
+    // and successful approval updates evaluation & matching paper in memory without redundant reloads
+    val studentCallsBeforeApprove = fakeStudentRepository.getStudentByIdCallCount
+    val classCallsBeforeApprove = fakeClassRepository.getClassByIdCallCount
+    val paperCallsBeforeApprove = fakePaperRepository.getPapersCallCount
+    val pageUrlCallsBeforeApprove = fakePaperRepository.getSignedPageUrlCallCount
+
+    val approveGate = kotlinx.coroutines.CompletableDeferred<Result<Unit>>()
+    pendingApprovalDeferred = approveGate
+
+    viewModel.approveEvaluation("eval-safe-1", "paper-safe-1")
+    viewModel.approveEvaluation("eval-safe-1", "paper-safe-1")
+    viewModel.approveEvaluation("eval-safe-1", "paper-safe-1")
+    assertTrue(viewModel.uiState.value.isApproving)
+
+    waitForCondition { approvalCallCount == 1 }
+    assertEquals(1, approvalCallCount)
+
+    approveGate.complete(Result.success(Unit))
+    pendingApprovalDeferred = null
+    waitForCondition { !viewModel.uiState.value.isApproving }
+
+    assertEquals(1, approvalCallCount)
+    assertTrue(viewModel.uiState.value.approvalSuccess)
+    assertNull(viewModel.uiState.value.approvalError)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.status)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals(false, viewModel.uiState.value.evaluationResult?.evaluation?.reviewRequired)
+    val approvedPaperAfterGate = viewModel.uiState.value.papers.first { it.id == "paper-safe-1" }
+    assertEquals("approved", approvedPaperAfterGate.status)
+    assertEquals("approved", approvedPaperAfterGate.evaluation?.status)
+    // Verify other papers remain untouched
+    assertEquals("needs_review", viewModel.uiState.value.papers.first { it.id == "paper-safe-2" }.status)
+    // Verify no redundant student, class, paper, or page reload occurred after approval
+    assertEquals(studentCallsBeforeApprove, fakeStudentRepository.getStudentByIdCallCount)
+    assertEquals(classCallsBeforeApprove, fakeClassRepository.getClassByIdCallCount)
+    assertEquals(paperCallsBeforeApprove, fakePaperRepository.getPapersCallCount)
+    assertEquals(pageUrlCallsBeforeApprove, fakePaperRepository.getSignedPageUrlCallCount)
+
+    // 3. Cancellation propagates without being shown as an ordinary failure (for both save and approval)
+    // 3a. Cancellation during saveTeacherCorrections
+    viewModel.setEvaluationResultForTesting("paper-safe-1", buildEvalResponse("eval-safe-1", "paper-safe-1"))
+    viewModel.onUpdateQuestion("eval-safe-1-q1", "1", 9.0, "Edited before cancel")
+    saveCallCount = 0
+    throwCancelOnSave = true
+
+    viewModel.saveTeacherCorrections("eval-safe-1", "paper-safe-1")
+    waitForCondition { !viewModel.uiState.value.isSavingCorrections && saveCallCount == 1 }
+
+    assertEquals(1, saveCallCount)
+    assertFalse(viewModel.uiState.value.isSavingCorrections)
+    assertFalse(viewModel.uiState.value.saveCorrectionsSuccess)
+    assertNull(viewModel.uiState.value.saveCorrectionsError)
+    assertNotNull(viewModel.uiState.value.editedQuestions) // Unsaved edits preserved
+
+    // Verify in-flight guard was cleaned up after cancellation so a retry succeeds
+    throwCancelOnSave = false
+    viewModel.saveTeacherCorrections("eval-safe-1", "paper-safe-1")
+    waitForCondition { !viewModel.uiState.value.isSavingCorrections && saveCallCount == 2 }
+    assertTrue(viewModel.uiState.value.saveCorrectionsSuccess)
+    assertNull(viewModel.uiState.value.saveCorrectionsError)
+    assertNull(viewModel.uiState.value.editedQuestions)
+
+    // 3b. Cancellation during approveEvaluation
+    approvalCallCount = 0
+    throwCancelOnApprove = true
+    viewModel.approveEvaluation("eval-safe-1", "paper-safe-1")
+    waitForCondition { !viewModel.uiState.value.isApproving && approvalCallCount == 1 }
+
+    assertEquals(1, approvalCallCount)
+    assertFalse(viewModel.uiState.value.isApproving)
+    assertFalse(viewModel.uiState.value.approvalSuccess)
+    assertNull(viewModel.uiState.value.approvalError)
+    assertEquals("needs_review", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+
+    // Verify in-flight guard was cleaned up after cancellation so a retry succeeds without redundant reload
+    throwCancelOnApprove = false
+    viewModel.approveEvaluation("eval-safe-1", "paper-safe-1")
+    waitForCondition { !viewModel.uiState.value.isApproving && approvalCallCount == 2 }
+    assertTrue(viewModel.uiState.value.approvalSuccess)
+    assertNull(viewModel.uiState.value.approvalError)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals("approved", viewModel.uiState.value.papers.first { it.id == "paper-safe-1" }.status)
+    assertEquals("approved", viewModel.uiState.value.papers.first { it.id == "paper-safe-1" }.evaluation?.status)
+    assertEquals(studentCallsBeforeApprove, fakeStudentRepository.getStudentByIdCallCount)
+    assertEquals(classCallsBeforeApprove, fakeClassRepository.getClassByIdCallCount)
+    assertEquals(paperCallsBeforeApprove, fakePaperRepository.getPapersCallCount)
+    assertEquals(pageUrlCallsBeforeApprove, fakePaperRepository.getSignedPageUrlCallCount)
+
+    // 4. openApprovedEvaluation() preserves actual database status and reviewRequired flag:
+    // never presents 'needs_review' or 'completed' as 'approved'
+    // 4a. DB status is 'needs_review' with reviewRequired = true
+    viewModel.dismissEvaluationDialog()
+    dbEvalStatus = "needs_review"
+    dbReviewRequired = true
+    viewModel.openApprovedEvaluation("paper-safe-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && viewModel.uiState.value.evaluationResult != null }
+
+    assertEquals("needs_review", viewModel.uiState.value.evaluationResult?.status)
+    assertEquals("needs_review", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals(true, viewModel.uiState.value.evaluationResult?.evaluation?.reviewRequired)
+    assertEquals(
+      "needs_review",
+      viewModel.uiState.value.papers.first { it.id == "paper-safe-1" }.status,
+    )
+
+    // 4b. DB status is 'completed' with reviewRequired = false
+    viewModel.dismissEvaluationDialog()
+    dbEvalStatus = "completed"
+    dbReviewRequired = false
+    viewModel.openApprovedEvaluation("paper-safe-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && viewModel.uiState.value.evaluationResult != null }
+
+    assertEquals("completed", viewModel.uiState.value.evaluationResult?.status)
+    assertEquals("completed", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals(false, viewModel.uiState.value.evaluationResult?.evaluation?.reviewRequired)
+    assertEquals(
+      "completed",
+      viewModel.uiState.value.papers.first { it.id == "paper-safe-1" }.status,
+    )
+
+    // 4c. DB status is genuinely 'approved'
+    viewModel.dismissEvaluationDialog()
+    dbEvalStatus = "approved"
+    dbReviewRequired = false
+    viewModel.openApprovedEvaluation("paper-safe-1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null && viewModel.uiState.value.evaluationResult != null }
+
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.status)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals(false, viewModel.uiState.value.evaluationResult?.evaluation?.reviewRequired)
+
+    // 5. A stale suspended operation finishing after the selected paper changes cannot overwrite the new paper's state
+    // 5a. Stale approveEvaluation for paper-safe-1 finishes after switching to paper-safe-2
+    viewModel.setEvaluationResultForTesting("paper-safe-1", buildEvalResponse("eval-safe-1", "paper-safe-1"))
+    val staleApproveGate = kotlinx.coroutines.CompletableDeferred<Result<Unit>>()
+    pendingApprovalDeferred = staleApproveGate
+    approvalCallCount = 0
+
+    viewModel.approveEvaluation("eval-safe-1", "paper-safe-1")
+    waitForCondition { approvalCallCount == 1 }
+
+    // Switch active paper to paper-safe-2 while paper-safe-1 approval is still suspended
+    viewModel.setEvaluationResultForTesting("paper-safe-2", buildEvalResponse("eval-safe-2", "paper-safe-2", q1Marks = 6.0, q2Marks = 6.0))
+    assertEquals("paper-safe-2", viewModel.uiState.value.evaluatedPaperId)
+    assertFalse(viewModel.uiState.value.isApproving)
+
+    // Complete stale paper-safe-1 approval
+    staleApproveGate.complete(Result.success(Unit))
+    pendingApprovalDeferred = null
+    Thread.sleep(50)
+    mainLooper.idle()
+
+    assertEquals("paper-safe-2", viewModel.uiState.value.evaluatedPaperId)
+    assertEquals("eval-safe-2", viewModel.uiState.value.evaluationResult?.evaluation?.id)
+    assertEquals("needs_review", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertFalse(viewModel.uiState.value.approvalSuccess)
+
+    // 5b. Stale saveTeacherCorrections for paper-safe-1 finishes after switching to paper-safe-2
+    viewModel.setEvaluationResultForTesting("paper-safe-1", buildEvalResponse("eval-safe-1", "paper-safe-1"))
+    viewModel.onUpdateQuestion("eval-safe-1-q1", "1", 9.0, "Paper 1 edit")
+    val staleSaveGate = kotlinx.coroutines.CompletableDeferred<Result<AiEvaluationResponse>>()
+    pendingSaveDeferred = staleSaveGate
+    saveCallCount = 0
+
+    viewModel.saveTeacherCorrections("eval-safe-1", "paper-safe-1")
+    waitForCondition { saveCallCount == 1 }
+
+    // Switch active paper to paper-safe-2 and make an unsaved edit on paper-safe-2
+    viewModel.setEvaluationResultForTesting("paper-safe-2", buildEvalResponse("eval-safe-2", "paper-safe-2", q1Marks = 6.0, q2Marks = 6.0))
+    viewModel.onUpdateQuestion("eval-safe-2-q1", "1", 10.0, "Paper 2 unsaved edit")
+    assertEquals("paper-safe-2", viewModel.uiState.value.evaluatedPaperId)
+    assertNotNull(viewModel.uiState.value.editedQuestions)
+
+    // Complete stale paper-safe-1 save
+    staleSaveGate.complete(
+      Result.success(buildEvalResponse("eval-safe-1", "paper-safe-1", q1Marks = 9.0, q2Marks = 7.0))
+    )
+    pendingSaveDeferred = null
+    Thread.sleep(50)
+    mainLooper.idle()
+
+    assertEquals("paper-safe-2", viewModel.uiState.value.evaluatedPaperId)
+    assertEquals("eval-safe-2", viewModel.uiState.value.evaluationResult?.evaluation?.id)
+    assertNotNull(viewModel.uiState.value.editedQuestions)
+    assertEquals(10.0, viewModel.uiState.value.editedQuestions?.first()?.awardedMarks ?: 0.0, 0.001)
+    assertFalse(viewModel.uiState.value.saveCorrectionsSuccess)
+
+    // 5c. Stale openApprovedEvaluation for paper-safe-1 finishes after switching to paper-safe-2
+    val staleLookupGate = kotlinx.coroutines.CompletableDeferred<Pair<com.example.data.model.EvaluationDbRecord, List<com.example.data.model.QuestionDbRecord>>?>()
+    pendingDbLookupDeferred = staleLookupGate
+    viewModel.openApprovedEvaluation("paper-safe-1")
+    assertEquals("paper-safe-1", viewModel.uiState.value.isEvaluatingPaperId)
+
+    // Switch active paper to paper-safe-2 while paper-safe-1 lookup is suspended
+    viewModel.setEvaluationResultForTesting("paper-safe-2", buildEvalResponse("eval-safe-2", "paper-safe-2", q1Marks = 6.0, q2Marks = 6.0))
+    staleLookupGate.complete(null)
+    pendingDbLookupDeferred = null
+    Thread.sleep(50)
+    mainLooper.idle()
+
+    assertEquals("paper-safe-2", viewModel.uiState.value.evaluatedPaperId)
+    assertEquals("eval-safe-2", viewModel.uiState.value.evaluationResult?.evaluation?.id)
+    assertNull(viewModel.uiState.value.evaluationError)
+  }
+
+  @Test
+  fun studentResultDetailViewModel_parallelDirectLookupNumericalSortStaleAndErrorHandling() {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+
+    val student1 = Student(
+      id = "stu-res-1",
+      classId = "cls-res-1",
+      teacherId = "user-123",
+      name = "Amina Tariq",
+      fatherName = "Tariq Mahmood",
+      rollNumber = "101",
+    )
+    val student2 = Student(
+      id = "stu-res-2",
+      classId = "cls-res-1",
+      teacherId = "user-123",
+      name = "Bilal Ahmed",
+      fatherName = "Ahmed Raza",
+      rollNumber = "102",
+    )
+    val classRoom = ClassRoom(
+      id = "cls-res-1",
+      examId = "exam-res-1",
+      teacherId = "user-123",
+      session = "2025-2026",
+      semester = "Fall",
+      timing = "Morning",
+      subjectName = "Physics",
+      totalMarks = 50,
+    )
+
+    val studentGate = kotlinx.coroutines.CompletableDeferred<Result<Student?>>()
+    val classGate = kotlinx.coroutines.CompletableDeferred<Result<ClassRoom?>>()
+    val evalGate = kotlinx.coroutines.CompletableDeferred<Pair<EvaluationDbRecord, List<QuestionDbRecord>>?>()
+
+    val studentRepo = FakeStudentRepository(
+      initialStudents = listOf(student1, student2),
+      deferredStudentByIdResult = studentGate,
+    )
+    val classRepo = FakeClassRepository(
+      initialClasses = listOf(classRoom),
+      deferredClassByIdResult = classGate,
+    )
+
+    var directEvalLookupCount = 0
+    var activeEvalDeferred: kotlinx.coroutines.CompletableDeferred<Pair<EvaluationDbRecord, List<QuestionDbRecord>>?>? = evalGate
+    var shouldThrowEvalError = false
+    var shouldThrowEvalCancellation = false
+    var staticEvalResult: Pair<EvaluationDbRecord, List<QuestionDbRecord>>? = null
+
+    val viewModel = StudentResultDetailViewModel(
+      studentRepository = studentRepo,
+      classRepository = classRepo,
+      approvedEvaluationFetcher = { reqStudentId, reqClassId ->
+        directEvalLookupCount++
+        if (shouldThrowEvalCancellation) {
+          throw kotlinx.coroutines.CancellationException("Simulated evaluation query cancellation")
+        }
+        if (shouldThrowEvalError) {
+          throw IllegalStateException("Supabase connection timeout while loading evaluation")
+        }
+        val gate = activeEvalDeferred
+        if (gate != null) {
+          gate.await()
+        } else {
+          staticEvalResult?.takeIf {
+            it.first.studentId == reqStudentId && it.first.classId == reqClassId
+          }
+        }
+      },
+    )
+
+    fun waitForCondition(timeoutMs: Long = 3000L, predicate: () -> Boolean) {
+      val deadline = System.currentTimeMillis() + timeoutMs
+      while (System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (predicate()) return
+        Thread.sleep(10)
+      }
+      mainLooper.idle()
+    }
+
+    // 1. Parallel execution & single direct approved evaluation lookup (no N+1 paper loop)
+    viewModel.loadStudentResult("stu-res-1", "cls-res-1")
+    waitForCondition {
+      studentRepo.getStudentByIdCallCount == 1 &&
+        classRepo.getClassByIdCallCount == 1 &&
+        directEvalLookupCount == 1
+    }
+    // All 3 independent lookups started concurrently before any gate completed
+    assertEquals(1, studentRepo.getStudentByIdCallCount)
+    assertEquals(1, classRepo.getClassByIdCallCount)
+    assertEquals(1, directEvalLookupCount)
+    assertTrue(viewModel.uiState.value.isLoading)
+
+    val evalRecord1 = EvaluationDbRecord(
+      id = "eval-res-1",
+      paperId = "paper-res-1",
+      studentId = "stu-res-1",
+      classId = "cls-res-1",
+      teacherId = "user-123",
+      status = "approved",
+      totalMarksObtained = 39.5,
+      totalMarks = 50.0,
+      percentage = 79.0,
+    )
+    // Unordered questions to verify numerical sorting
+    val unsortedQuestions = listOf(
+      QuestionDbRecord(
+        id = "q-10",
+        evaluationId = "eval-res-1",
+        questionNumber = "10",
+        questionText = "Question Ten",
+        studentAnswer = "Ans 10",
+        awardedMarks = 8.0,
+        maximumMarks = 10.0,
+        feedback = "Good",
+      ),
+      QuestionDbRecord(
+        id = "q-2b",
+        evaluationId = "eval-res-1",
+        questionNumber = "2(b)",
+        questionText = "Question Two B",
+        studentAnswer = "Ans 2b",
+        awardedMarks = 4.5,
+        maximumMarks = 5.0,
+        feedback = "Nice",
+      ),
+      QuestionDbRecord(
+        id = "q-1",
+        evaluationId = "eval-res-1",
+        questionNumber = "1",
+        questionText = "Question One",
+        studentAnswer = "Ans 1",
+        awardedMarks = 10.0,
+        maximumMarks = 10.0,
+        feedback = "Excellent",
+      ),
+      QuestionDbRecord(
+        id = "q-2a",
+        evaluationId = "eval-res-1",
+        questionNumber = "2(a)",
+        questionText = "Question Two A",
+        studentAnswer = "Ans 2a",
+        awardedMarks = 5.0,
+        maximumMarks = 5.0,
+        feedback = "Complete",
+      ),
+      QuestionDbRecord(
+        id = "q-2",
+        evaluationId = "eval-res-1",
+        questionNumber = "2",
+        questionText = "Question Two Main",
+        studentAnswer = "Ans 2",
+        awardedMarks = 12.0,
+        maximumMarks = 15.0,
+        feedback = "Well done",
+      ),
+    )
+
+    studentGate.complete(Result.success(student1))
+    classGate.complete(Result.success(classRoom))
+    evalGate.complete(Pair(evalRecord1, unsortedQuestions))
+    studentRepo.deferredStudentByIdResult = null
+    classRepo.deferredClassByIdResult = null
+    activeEvalDeferred = null
+
+    waitForCondition { !viewModel.uiState.value.isLoading }
+
+    // 2. Numerical question ordering & preserved result calculations
+    assertNull(viewModel.uiState.value.errorMessage)
+    assertEquals("Amina Tariq", viewModel.uiState.value.student?.name)
+    assertEquals("Physics", viewModel.uiState.value.classRoom?.subjectName)
+    assertEquals("eval-res-1", viewModel.uiState.value.evaluation?.id)
+    assertEquals(39.5, viewModel.uiState.value.evaluation?.totalMarksObtained ?: 0.0, 0.001)
+    assertEquals(50.0, viewModel.uiState.value.evaluation?.totalMarks ?: 0.0, 0.001)
+    assertEquals(79.0, viewModel.uiState.value.evaluation?.percentage ?: 0.0, 0.001)
+    assertEquals(
+      listOf("1", "2", "2(a)", "2(b)", "10"),
+      viewModel.uiState.value.evaluation?.questions?.map { it.questionNumber },
+    )
+    assertEquals(45.0, viewModel.uiState.value.evaluation?.extractedQuestionTotalMarks ?: 0.0, 0.001)
+
+    // 3. Database error on refresh surfaces errorMessage and preserves prior valid result
+    shouldThrowEvalError = true
+    viewModel.loadStudentResult("stu-res-1", "cls-res-1")
+    waitForCondition { !viewModel.uiState.value.isLoading && viewModel.uiState.value.errorMessage != null }
+    assertTrue(viewModel.uiState.value.errorMessage!!.contains("Supabase connection timeout"))
+    // Previous valid evaluation is still preserved rather than falsely wiped to "No Approved Result Yet"
+    assertEquals("eval-res-1", viewModel.uiState.value.evaluation?.id)
+    shouldThrowEvalError = false
+
+    // 4. Approved-only and student/class ownership filtering
+    val unapprovedRecord = evalRecord1.copy(id = "eval-unapproved", status = "needs_review")
+    staticEvalResult = Pair(unapprovedRecord, unsortedQuestions)
+    viewModel.loadStudentResult("stu-res-2", "cls-res-1")
+    waitForCondition { !viewModel.uiState.value.isLoading && viewModel.uiState.value.student?.id == "stu-res-2" }
+    assertNull(viewModel.uiState.value.errorMessage)
+    assertNull(viewModel.uiState.value.evaluation)
+
+    // 5. Cancellation handling (both direct CancellationException and wrapped in Result.failure)
+    shouldThrowEvalCancellation = true
+    viewModel.loadStudentResult("stu-res-2", "cls-res-1")
+    Thread.sleep(40)
+    mainLooper.idle()
+    assertNull(viewModel.uiState.value.errorMessage)
+    shouldThrowEvalCancellation = false
+
+    studentRepo.throwCancellation = true
+    studentRepo.swallowCancellationIntoFailure = true
+    viewModel.loadStudentResult("stu-res-2", "cls-res-1")
+    Thread.sleep(40)
+    mainLooper.idle()
+    assertNull(viewModel.uiState.value.errorMessage)
+    studentRepo.throwCancellation = false
+    studentRepo.swallowCancellationIntoFailure = false
+
+    // 6. Stale-request protection when switching from stu-res-1 to stu-res-2
+    val staleEvalGate = kotlinx.coroutines.CompletableDeferred<Pair<EvaluationDbRecord, List<QuestionDbRecord>>?>()
+    activeEvalDeferred = staleEvalGate
+    viewModel.loadStudentResult("stu-res-1", "cls-res-1")
+    waitForCondition { viewModel.uiState.value.isLoading }
+
+    // Switch immediately to stu-res-2 with a fast response
+    activeEvalDeferred = null
+    val evalRecord2 = evalRecord1.copy(
+      id = "eval-res-2",
+      paperId = "paper-res-2",
+      studentId = "stu-res-2",
+      totalMarksObtained = 48.0,
+      percentage = 96.0,
+    )
+    staticEvalResult = Pair(evalRecord2, listOf(unsortedQuestions[2].copy(evaluationId = "eval-res-2")))
+    viewModel.loadStudentResult("stu-res-2", "cls-res-1")
+    waitForCondition { !viewModel.uiState.value.isLoading && viewModel.uiState.value.evaluation?.id == "eval-res-2" }
+
+    // Complete stale stu-res-1 gate afterwards; state must remain stu-res-2
+    staleEvalGate.complete(Pair(evalRecord1, unsortedQuestions))
+    Thread.sleep(40)
+    mainLooper.idle()
+    assertEquals("stu-res-2", viewModel.uiState.value.student?.id)
+    assertEquals("eval-res-2", viewModel.uiState.value.evaluation?.id)
+  }
+
+  @Test
+  fun classResultsAndReportViewModels_errorReportingStaleCancellationAndOwnershipFiltering() {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+
+    val exam = Exam(
+      id = "exam-cr-1",
+      teacherId = "user-123",
+      name = "Final Term 2026",
+      type = "Final",
+      date = "2026-10-15",
+    )
+    val class1 = ClassRoom(
+      id = "cls-cr-1",
+      examId = "exam-cr-1",
+      teacherId = "user-123",
+      session = "2025-2026",
+      semester = "Spring",
+      timing = "Morning",
+      subjectName = "Chemistry",
+      totalMarks = 100,
+    )
+    val class2 = ClassRoom(
+      id = "cls-cr-2",
+      examId = "exam-cr-1",
+      teacherId = "user-123",
+      session = "2025-2026",
+      semester = "Spring",
+      timing = "Evening",
+      subjectName = "Mathematics",
+      totalMarks = 100,
+    )
+    val stu1 = Student(
+      id = "stu-cr-1",
+      classId = "cls-cr-1",
+      teacherId = "user-123",
+      name = "Zainab Ali",
+      fatherName = "Ali Hassan",
+      rollNumber = "01",
+    )
+    val stu2 = Student(
+      id = "stu-cr-2",
+      classId = "cls-cr-1",
+      teacherId = "user-123",
+      name = "Omar Farooq",
+      fatherName = "Farooq Azam",
+      rollNumber = "02",
+    )
+    val stuClass2 = Student(
+      id = "stu-cr-3",
+      classId = "cls-cr-2",
+      teacherId = "user-123",
+      name = "Hina Khan",
+      fatherName = "Imran Khan",
+      rollNumber = "01",
+    )
+
+    val examRepo = FakeExamRepository(initialExams = listOf(exam))
+    val classRepo = FakeClassRepository(initialClasses = listOf(class1, class2))
+    val studentRepo = FakeStudentRepository(initialStudents = listOf(stu1, stu2, stuClass2))
+
+    var shouldFailEvalQuery = false
+    var shouldCancelEvalQuery = false
+    var evalQueryGate: kotlinx.coroutines.CompletableDeferred<List<EvaluationDbRecord>>? = null
+    var staticEvaluationsByClass: Map<String, List<EvaluationDbRecord>> = emptyMap()
+
+    val resultsViewModel = ClassResultsViewModel(
+      classRepository = classRepo,
+      studentRepository = studentRepo,
+      approvedEvaluationsFetcher = { reqClassId ->
+        if (shouldCancelEvalQuery) {
+          throw kotlinx.coroutines.CancellationException("Simulated evaluations query cancellation")
+        }
+        if (shouldFailEvalQuery) {
+          throw IllegalStateException("Database unavailable while fetching evaluations")
+        }
+        val gate = evalQueryGate
+        if (gate != null) {
+          gate.await()
+        } else {
+          staticEvaluationsByClass[reqClassId].orEmpty()
+        }
+      },
+    )
+
+    val reportViewModel = ClassReportViewModel(
+      classRepository = classRepo,
+      examRepository = examRepo,
+      studentRepository = studentRepo,
+      approvedEvaluationsFetcher = { reqClassId ->
+        if (shouldCancelEvalQuery) {
+          throw kotlinx.coroutines.CancellationException("Simulated evaluations query cancellation")
+        }
+        if (shouldFailEvalQuery) {
+          throw IllegalStateException("Database unavailable while fetching evaluations")
+        }
+        val gate = evalQueryGate
+        if (gate != null) {
+          gate.await()
+        } else {
+          staticEvaluationsByClass[reqClassId].orEmpty()
+        }
+      },
+    )
+
+    fun waitForCondition(timeoutMs: Long = 3000L, predicate: () -> Boolean) {
+      val deadline = System.currentTimeMillis() + timeoutMs
+      while (System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (predicate()) return
+        Thread.sleep(10)
+      }
+      mainLooper.idle()
+    }
+
+    // 1. Database error on initial load must set errorMessage and NOT populate students as "Not Evaluated"
+    shouldFailEvalQuery = true
+    resultsViewModel.loadClassResults("cls-cr-1")
+    reportViewModel.loadClassReport("cls-cr-1")
+    waitForCondition {
+      !resultsViewModel.uiState.value.isLoading && !reportViewModel.uiState.value.isLoading
+    }
+
+    assertNotNull(resultsViewModel.uiState.value.errorMessage)
+    assertTrue(resultsViewModel.uiState.value.students.isEmpty())
+    assertTrue(resultsViewModel.uiState.value.evaluationsByStudentId.isEmpty())
+
+    assertNotNull(reportViewModel.uiState.value.errorMessage)
+    assertTrue(reportViewModel.uiState.value.students.isEmpty())
+    assertTrue(reportViewModel.uiState.value.evaluationsByStudentId.isEmpty())
+    shouldFailEvalQuery = false
+
+    // 2. Approved-only and student/class ownership filtering
+    val approvedStu1Latest = EvaluationDbRecord(
+      id = "eval-stu1-latest",
+      paperId = "p-1",
+      studentId = "stu-cr-1",
+      classId = "cls-cr-1",
+      teacherId = "user-123",
+      status = "approved",
+      totalMarksObtained = 88.0,
+      totalMarks = 100.0,
+      percentage = 88.0,
+    )
+    val approvedStu1Older = EvaluationDbRecord(
+      id = "eval-stu1-older",
+      paperId = "p-0",
+      studentId = "stu-cr-1",
+      classId = "cls-cr-1",
+      teacherId = "user-123",
+      status = "approved",
+      totalMarksObtained = 70.0,
+      totalMarks = 100.0,
+      percentage = 70.0,
+    )
+    val unapprovedStu2 = EvaluationDbRecord(
+      id = "eval-stu2-draft",
+      paperId = "p-2",
+      studentId = "stu-cr-2",
+      classId = "cls-cr-1",
+      teacherId = "user-123",
+      status = "needs_review",
+      totalMarksObtained = 95.0,
+      totalMarks = 100.0,
+      percentage = 95.0,
+    )
+    val foreignStudentEval = EvaluationDbRecord(
+      id = "eval-foreign",
+      paperId = "p-3",
+      studentId = "stu-cr-3",
+      classId = "cls-cr-1",
+      teacherId = "user-123",
+      status = "approved",
+      totalMarksObtained = 91.0,
+      totalMarks = 100.0,
+      percentage = 91.0,
+    )
+    staticEvaluationsByClass = mapOf(
+      "cls-cr-1" to listOf(approvedStu1Older, approvedStu1Latest, unapprovedStu2, foreignStudentEval),
+      "cls-cr-2" to listOf(
+        EvaluationDbRecord(
+          id = "eval-cls2-stu3",
+          paperId = "p-4",
+          studentId = "stu-cr-3",
+          classId = "cls-cr-2",
+          teacherId = "user-123",
+          status = "approved",
+          totalMarksObtained = 92.0,
+          totalMarks = 100.0,
+          percentage = 92.0,
+        )
+      ),
+    )
+
+    resultsViewModel.loadClassResults("cls-cr-1")
+    reportViewModel.loadClassReport("cls-cr-1")
+    waitForCondition {
+      !resultsViewModel.uiState.value.isLoading && !reportViewModel.uiState.value.isLoading
+    }
+
+    assertNull(resultsViewModel.uiState.value.errorMessage)
+    assertEquals(2, resultsViewModel.uiState.value.students.size)
+    assertEquals(1, resultsViewModel.uiState.value.evaluationsByStudentId.size)
+    assertEquals(88.0, resultsViewModel.uiState.value.evaluationsByStudentId["stu-cr-1"]?.totalMarksObtained ?: 0.0, 0.001)
+    assertNull(resultsViewModel.uiState.value.evaluationsByStudentId["stu-cr-2"])
+    assertNull(resultsViewModel.uiState.value.evaluationsByStudentId["stu-cr-3"])
+
+    assertNull(reportViewModel.uiState.value.errorMessage)
+    assertEquals("Final Term 2026", reportViewModel.uiState.value.exam?.name)
+    assertEquals(2, reportViewModel.uiState.value.students.size)
+    assertEquals(1, reportViewModel.uiState.value.evaluationsByStudentId.size)
+    assertEquals(88.0, reportViewModel.uiState.value.evaluationsByStudentId["stu-cr-1"]?.totalMarksObtained ?: 0.0, 0.001)
+
+    // 3. Failed refresh preserves existing valid state and sets errorMessage
+    shouldFailEvalQuery = true
+    resultsViewModel.loadClassResults("cls-cr-1")
+    reportViewModel.loadClassReport("cls-cr-1")
+    waitForCondition {
+      !resultsViewModel.uiState.value.isLoading && !reportViewModel.uiState.value.isLoading
+    }
+    assertNotNull(resultsViewModel.uiState.value.errorMessage)
+    assertEquals(1, resultsViewModel.uiState.value.evaluationsByStudentId.size)
+    assertNotNull(reportViewModel.uiState.value.errorMessage)
+    assertEquals(1, reportViewModel.uiState.value.evaluationsByStudentId.size)
+    shouldFailEvalQuery = false
+
+    // 4. Cancellation handling does not set errorMessage
+    shouldCancelEvalQuery = true
+    resultsViewModel.loadClassResults("cls-cr-1")
+    reportViewModel.loadClassReport("cls-cr-1")
+    Thread.sleep(40)
+    mainLooper.idle()
+    assertNull(resultsViewModel.uiState.value.errorMessage)
+    assertNull(reportViewModel.uiState.value.errorMessage)
+    shouldCancelEvalQuery = false
+
+    // 5. Stale-request protection when switching from cls-cr-1 to cls-cr-2
+    val staleGate = kotlinx.coroutines.CompletableDeferred<List<EvaluationDbRecord>>()
+    evalQueryGate = staleGate
+    resultsViewModel.loadClassResults("cls-cr-1")
+    reportViewModel.loadClassReport("cls-cr-1")
+    waitForCondition { resultsViewModel.uiState.value.isLoading && reportViewModel.uiState.value.isLoading }
+
+    evalQueryGate = null
+    resultsViewModel.loadClassResults("cls-cr-2")
+    reportViewModel.loadClassReport("cls-cr-2")
+    waitForCondition {
+      !resultsViewModel.uiState.value.isLoading &&
+        !reportViewModel.uiState.value.isLoading &&
+        resultsViewModel.uiState.value.classRoom?.id == "cls-cr-2" &&
+        reportViewModel.uiState.value.classRoom?.id == "cls-cr-2"
+    }
+
+    staleGate.complete(listOf(approvedStu1Latest))
+    Thread.sleep(40)
+    mainLooper.idle()
+    assertEquals("cls-cr-2", resultsViewModel.uiState.value.classRoom?.id)
+    assertEquals("eval-cls2-stu3", resultsViewModel.uiState.value.evaluationsByStudentId["stu-cr-3"]?.id)
+    assertEquals("cls-cr-2", reportViewModel.uiState.value.classRoom?.id)
+    assertEquals("eval-cls2-stu3", reportViewModel.uiState.value.evaluationsByStudentId["stu-cr-3"]?.id)
+  }
+
+  @Test
+  fun evaluationAndOcrHttpCancellation_cancelsUnderlyingOkHttpCallsWithoutFalseErrorsOrCrossInterference() {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+
+    fun waitForCondition(timeoutMs: Long = 3000L, predicate: () -> Boolean) {
+      val deadline = System.currentTimeMillis() + timeoutMs
+      while (System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (predicate()) return
+        Thread.sleep(10)
+      }
+      mainLooper.idle()
+    }
+
+    val student = Student(
+      id = "stu-http-1",
+      classId = "cls-http-1",
+      teacherId = "user-123",
+      name = "Sana Tariq",
+      fatherName = "Tariq Aziz",
+      rollNumber = "15",
+    )
+    val classRoom = ClassRoom(
+      id = "cls-http-1",
+      examId = "exam-http-1",
+      teacherId = "user-123",
+      session = "2025-2026",
+      semester = "Fall",
+      timing = "Morning",
+      subjectName = "Computer Networks",
+      totalMarks = 20,
+    )
+    val paper1 = StudentPaper(
+      id = "paper-http-1",
+      studentId = "stu-http-1",
+      classId = "cls-http-1",
+      teacherId = "user-123",
+      totalPages = 1,
+      pages = listOf(
+        StudentPaperPage(
+          id = "page-http-1",
+          paperId = "paper-http-1",
+          studentId = "stu-http-1",
+          teacherId = "user-123",
+          pageNumber = 1,
+          storagePath = "user-123/paper-http-1/page_1.jpg",
+        )
+      ),
+    )
+    val paper2 = StudentPaper(
+      id = "paper-http-2",
+      studentId = "stu-http-1",
+      classId = "cls-http-1",
+      teacherId = "user-123",
+      totalPages = 1,
+      pages = listOf(
+        StudentPaperPage(
+          id = "page-http-2",
+          paperId = "paper-http-2",
+          studentId = "stu-http-1",
+          teacherId = "user-123",
+          pageNumber = 1,
+          storagePath = "user-123/paper-http-2/page_1.jpg",
+        )
+      ),
+    )
+
+    // --- Part A: Evaluation HTTP Call Cancellation & Lifecycle ---
+    val recordedEvalCalls = java.util.concurrent.CopyOnWriteArrayList<okhttp3.Call>()
+    val canceledEvalCalls = java.util.concurrent.CopyOnWriteArrayList<okhttp3.Call>()
+    var holdEvalHttpCall = false
+    var evalHttpStatusToReturn = 200
+    var evalHttpThrowNetworkError = false
+
+    val evalHttpClient = okhttp3.OkHttpClient.Builder()
+      .eventListener(object : okhttp3.EventListener() {
+        override fun canceled(call: okhttp3.Call) {
+          canceledEvalCalls.add(call)
+        }
+      })
+      .addInterceptor { chain ->
+        val call = chain.call()
+        recordedEvalCalls.add(call)
+        if (holdEvalHttpCall) {
+          val deadline = System.currentTimeMillis() + 3000L
+          while (!call.isCanceled() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10)
+          }
+          if (call.isCanceled()) {
+            throw java.io.IOException("Canceled")
+          }
+        }
+        if (evalHttpThrowNetworkError) {
+          throw java.io.IOException("Connection reset by peer")
+        }
+        val bodyJson = if (evalHttpStatusToReturn == 200) {
+          """
+            {
+              "status": "completed",
+              "percentageAvailable": true,
+              "evaluation": {
+                "id": "eval-http-ok",
+                "paperId": "paper-http-2",
+                "studentId": "stu-http-1",
+                "classId": "cls-http-1",
+                "teacherId": "user-123",
+                "status": "completed",
+                "totalMarksObtained": 19.0,
+                "totalMarks": 20.0,
+                "percentage": 95.0,
+                "reviewRequired": false,
+                "questions": [
+                  {
+                    "id": "q-http-1",
+                    "evaluation_id": "eval-http-ok",
+                    "question_number": "1",
+                    "question_text": "What is TCP?",
+                    "maximum_marks": 20.0,
+                    "student_answer": "Transmission Control Protocol",
+                    "awarded_marks": 19.0,
+                    "feedback": "Accurate"
+                  }
+                ]
+              }
+            }
+          """.trimIndent()
+        } else {
+          """{"error":"Edge Function internal error"}"""
+        }
+        okhttp3.Response.Builder()
+          .request(chain.request())
+          .protocol(okhttp3.Protocol.HTTP_1_1)
+          .code(evalHttpStatusToReturn)
+          .message(if (evalHttpStatusToReturn == 200) "OK" else "Error")
+          .body(with(okhttp3.ResponseBody) { bodyJson.toResponseBody(null) })
+          .build()
+      }
+      .build()
+
+    // --- Part B: OCR HTTP Call Cancellation & Lifecycle ---
+    val recordedOcrCalls = java.util.concurrent.CopyOnWriteArrayList<okhttp3.Call>()
+    val canceledOcrCalls = java.util.concurrent.CopyOnWriteArrayList<okhttp3.Call>()
+    var holdOcrHttpCall = false
+    var ocrHttpStatusToReturn = 200
+    var ocrResponseText = "Transcribed page text from OCR Edge Function."
+
+    val ocrHttpClient = okhttp3.OkHttpClient.Builder()
+      .eventListener(object : okhttp3.EventListener() {
+        override fun canceled(call: okhttp3.Call) {
+          canceledOcrCalls.add(call)
+        }
+      })
+      .addInterceptor { chain ->
+        val call = chain.call()
+        recordedOcrCalls.add(call)
+        if (holdOcrHttpCall) {
+          val deadline = System.currentTimeMillis() + 3000L
+          while (!call.isCanceled() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10)
+          }
+          if (call.isCanceled()) {
+            throw java.io.IOException("Canceled")
+          }
+        }
+        val bodyJson = if (ocrHttpStatusToReturn == 200) {
+          """{"status":"completed","ocrText":"$ocrResponseText"}"""
+        } else {
+          """{"status":"failed","error":"OCR service overloaded"}"""
+        }
+        okhttp3.Response.Builder()
+          .request(chain.request())
+          .protocol(okhttp3.Protocol.HTTP_1_1)
+          .code(ocrHttpStatusToReturn)
+          .message(if (ocrHttpStatusToReturn == 200) "OK" else "Error")
+          .body(with(okhttp3.ResponseBody) { bodyJson.toResponseBody(null) })
+          .build()
+      }
+      .build()
+
+    val realOcrRepository = SupabaseOcrRepository(
+      authRepository = FakeAuthRepository(signedInUser = "teacher@example.com"),
+      httpClient = ocrHttpClient,
+      accessTokenProvider = { "test-ocr-jwt-token" },
+    )
+
+    var lookupCount = 0
+    val studentRepo = FakeStudentRepository(listOf(student))
+    val classRepo = FakeClassRepository(listOf(classRoom))
+    val paperRepo = FakePaperRepository(listOf(paper1, paper2))
+
+    val viewModel = StudentDetailViewModel(
+      studentRepository = studentRepo,
+      classRepository = classRepo,
+      paperRepository = paperRepo,
+      ocrRepository = realOcrRepository,
+      evaluationHttpClient = evalHttpClient,
+      existingEvaluationDbFetcher = {
+        lookupCount++
+        null
+      },
+      evaluationAccessTokenProvider = { "test-eval-jwt-token" },
+    )
+
+    viewModel.loadStudentAndPapers("stu-http-1")
+    waitForCondition { !viewModel.uiState.value.isLoading }
+
+    // 1. Cancelling an in-flight evaluation via stopAiEvaluation() cancels its underlying OkHttp Call,
+    //    does NOT set evaluationError, and does NOT trigger extra fallback lookups
+    holdEvalHttpCall = true
+    lookupCount = 0
+    viewModel.runAiEvaluation("paper-http-1")
+    waitForCondition { recordedEvalCalls.size == 1 }
+    val evalCall1 = recordedEvalCalls[0]
+    assertFalse(evalCall1.isCanceled())
+
+    viewModel.stopAiEvaluation("paper-http-1")
+    waitForCondition { evalCall1.isCanceled() && canceledEvalCalls.contains(evalCall1) }
+    assertTrue(evalCall1.isCanceled())
+    assertTrue(canceledEvalCalls.contains(evalCall1))
+    assertNull(viewModel.uiState.value.isEvaluatingPaperId)
+    assertNull(viewModel.uiState.value.evaluationError)
+    // Only the single initial lookup ran; no unintended retry or 409 fallback lookup occurred
+    assertEquals(1, lookupCount)
+
+    // 2. Starting a newer evaluation after cancelling an older one does not cancel the newer Call
+    holdEvalHttpCall = false
+    evalHttpStatusToReturn = 200
+    viewModel.runAiEvaluation("paper-http-2")
+    waitForCondition {
+      recordedEvalCalls.size == 2 &&
+        viewModel.uiState.value.isEvaluatingPaperId == null &&
+        viewModel.uiState.value.evaluationResult != null
+    }
+    val evalCall2 = recordedEvalCalls[1]
+    assertTrue(evalCall1.isCanceled())
+    assertFalse(evalCall2.isCanceled())
+    assertNull(viewModel.uiState.value.evaluationError)
+    assertEquals("eval-http-ok", viewModel.uiState.value.evaluationResult?.evaluation?.id)
+
+    // 3. Genuine HTTP failure on evaluation still reports evaluationError properly
+    viewModel.setEvaluationResultForTesting("paper-http-1", null)
+    evalHttpStatusToReturn = 500
+    viewModel.runAiEvaluation("paper-http-1")
+    waitForCondition {
+      recordedEvalCalls.size == 3 &&
+        viewModel.uiState.value.isEvaluatingPaperId == null &&
+        viewModel.uiState.value.evaluationError != null
+    }
+    assertFalse(recordedEvalCalls[2].isCanceled())
+    assertTrue(viewModel.uiState.value.evaluationError!!.contains("HTTP 500"))
+    evalHttpStatusToReturn = 200
+
+    // 4. Direct coroutine cancellation on SupabaseOcrRepository.processPageOcr() cancels OkHttp Call
+    //    and propagates CancellationException (never returning Result.failure)
+    holdOcrHttpCall = true
+    var ocrCoroutineOutcome: Throwable? = null
+    val ocrTestScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+    val directOcrJob = ocrTestScope.launch {
+      try {
+        realOcrRepository.processPageOcr("paper-http-1", "page-http-1")
+      } catch (t: Throwable) {
+        ocrCoroutineOutcome = t
+        throw t
+      }
+    }
+    waitForCondition { recordedOcrCalls.size == 1 }
+    val ocrCall1 = recordedOcrCalls[0]
+    assertFalse(ocrCall1.isCanceled())
+
+    directOcrJob.cancel()
+    waitForCondition { ocrCall1.isCanceled() && ocrCoroutineOutcome != null }
+    assertTrue(ocrCall1.isCanceled())
+    assertTrue(canceledOcrCalls.contains(ocrCall1))
+    assertTrue(ocrCoroutineOutcome is kotlinx.coroutines.CancellationException)
+
+    // 5. Cancelling an in-flight OCR request in StudentDetailViewModel cancels its OkHttp Call
+    //    without setting ocrErrorByPageId, and does not interfere with a subsequent OCR request
+    viewModel.runOcrForPage("paper-http-1", "page-http-1")
+    waitForCondition { recordedOcrCalls.size == 2 }
+    val ocrCall2 = recordedOcrCalls[1]
+    assertTrue("page-http-1" in viewModel.uiState.value.ocrLoadingPageIds)
+    assertFalse(ocrCall2.isCanceled())
+
+    viewModel.cancelOcrForPage("page-http-1")
+    waitForCondition { ocrCall2.isCanceled() && "page-http-1" !in viewModel.uiState.value.ocrLoadingPageIds }
+    assertTrue(ocrCall2.isCanceled())
+    assertTrue(canceledOcrCalls.contains(ocrCall2))
+    assertNull(viewModel.uiState.value.ocrErrorByPageId["page-http-1"])
+    assertNull(viewModel.uiState.value.ocrTextByPageId["page-http-1"])
+
+    // Newer OCR request succeeds normally and its Call is not cancelled by the earlier cancelled request
+    holdOcrHttpCall = false
+    ocrHttpStatusToReturn = 200
+    ocrResponseText = "Normalized 3NF schema explanation."
+    viewModel.runOcrForPage("paper-http-1", "page-http-1")
+    waitForCondition {
+      recordedOcrCalls.size == 3 &&
+        "page-http-1" !in viewModel.uiState.value.ocrLoadingPageIds &&
+        viewModel.uiState.value.ocrTextByPageId["page-http-1"] != null
+    }
+    val ocrCall3 = recordedOcrCalls[2]
+    assertFalse(ocrCall3.isCanceled())
+    assertEquals("Normalized 3NF schema explanation.", viewModel.uiState.value.ocrTextByPageId["page-http-1"])
+    assertNull(viewModel.uiState.value.ocrErrorByPageId["page-http-1"])
+
+    // Genuine OCR HTTP error still surfaces in ocrErrorByPageId
+    ocrHttpStatusToReturn = 503
+    viewModel.runOcrForPage("paper-http-2", "page-http-2")
+    waitForCondition {
+      recordedOcrCalls.size == 4 &&
+        "page-http-2" !in viewModel.uiState.value.ocrLoadingPageIds &&
+        viewModel.uiState.value.ocrErrorByPageId["page-http-2"] != null
+    }
+    assertFalse(recordedOcrCalls[3].isCanceled())
+    assertEquals("OCR service overloaded", viewModel.uiState.value.ocrErrorByPageId["page-http-2"])
+  }
+
+  @Test
+  fun teacherReviewInitialLoadRace_waitsForPaperLoadReusesApprovedAndPreventsStaleEvaluation() {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+
+    fun waitForCondition(timeoutMs: Long = 3000L, predicate: () -> Boolean) {
+      val deadline = System.currentTimeMillis() + timeoutMs
+      while (System.currentTimeMillis() < deadline) {
+        mainLooper.idle()
+        if (predicate()) return
+        Thread.sleep(10)
+      }
+      mainLooper.idle()
+    }
+
+    var student1PapersDeferred = kotlinx.coroutines.CompletableDeferred<Result<List<StudentPaper>>>()
+    var student2PapersDeferred = kotlinx.coroutines.CompletableDeferred<Result<List<StudentPaper>>>()
+    val dbEvalByPaperId = mutableMapOf<String, Pair<com.example.data.model.EvaluationDbRecord, List<com.example.data.model.QuestionDbRecord>>?>()
+    val edgeFunctionCallPaperIds = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+    val student1 = Student(
+      id = "student-race-1",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      name = "Student One",
+      fatherName = "Father One",
+      rollNumber = "R-1",
+    )
+    val student2 = Student(
+      id = "student-race-2",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      name = "Student Two",
+      fatherName = "Father Two",
+      rollNumber = "R-2",
+    )
+    val classRoom = ClassRoom(
+      id = "class-race-1",
+      examId = "exam-race-1",
+      teacherId = "teacher-1",
+      session = "2025-2026",
+      semester = "Fall",
+      timing = "Morning",
+      subjectName = "Physics",
+      totalMarks = 20,
+    )
+
+    val fakePaperRepo = object : PaperRepository {
+      override suspend fun getPapersByStudentId(studentId: String): Result<List<StudentPaper>> {
+        return when (studentId) {
+          "student-race-1" -> student1PapersDeferred.await()
+          "student-race-2" -> student2PapersDeferred.await()
+          else -> Result.success(emptyList())
+        }
+      }
+
+      override suspend fun createPaperWithPages(
+        context: Context,
+        studentId: String,
+        classId: String,
+        pageUris: List<Uri>,
+        onProgress: (current: Int, total: Int) -> Unit,
+      ): Result<StudentPaper> = Result.failure(UnsupportedOperationException())
+
+      override suspend fun getSignedPageUrl(storagePath: String, expiresInSeconds: Long): Result<String> {
+        return Result.success("https://example.com/signed/$storagePath")
+      }
+
+      override suspend fun deletePaper(paper: StudentPaper): Result<Unit> = Result.success(Unit)
+      override suspend fun deletePaperPage(page: StudentPaperPage): Result<Unit> = Result.success(Unit)
+    }
+
+    val evalHttpClient = okhttp3.OkHttpClient.Builder()
+      .addInterceptor { chain ->
+        val bodyBuffer = okio.Buffer()
+        chain.request().body?.writeTo(bodyBuffer)
+        val reqBodyStr = bodyBuffer.readUtf8()
+        val paperIdMatch = Regex(""""paperId"\s*:\s*"([^"]+)"""").find(reqBodyStr)
+        val requestedPaperId = paperIdMatch?.groupValues?.get(1) ?: "unknown"
+        edgeFunctionCallPaperIds.add(requestedPaperId)
+
+        val bodyJson = """
+          {
+            "status": "completed",
+            "percentageAvailable": true,
+            "evaluation": {
+              "id": "eval-ai-$requestedPaperId",
+              "paperId": "$requestedPaperId",
+              "studentId": "student-race-1",
+              "classId": "class-race-1",
+              "teacherId": "teacher-1",
+              "status": "completed",
+              "totalMarksObtained": 18.0,
+              "totalMarks": 20.0,
+              "percentage": 90.0,
+              "reviewRequired": false,
+              "questions": [
+                {
+                  "id": "q-ai-1",
+                  "evaluation_id": "eval-ai-$requestedPaperId",
+                  "question_number": "1",
+                  "question_text": "State Ohm's Law.",
+                  "maximum_marks": 20.0,
+                  "student_answer": "V = I * R at constant temperature.",
+                  "expected_answer": "V is proportional to I at constant temperature.",
+                  "awarded_marks": 18.0,
+                  "feedback": "Accurate answer.",
+                  "review_required": false
+                }
+              ]
+            }
+          }
+        """.trimIndent()
+
+        okhttp3.Response.Builder()
+          .request(chain.request())
+          .protocol(okhttp3.Protocol.HTTP_1_1)
+          .code(200)
+          .message("OK")
+          .body(with(okhttp3.ResponseBody) { bodyJson.toResponseBody(null) })
+          .build()
+      }
+      .build()
+
+    val viewModel = StudentDetailViewModel(
+      studentRepository = FakeStudentRepository(listOf(student1, student2)),
+      classRepository = FakeClassRepository(listOf(classRoom)),
+      paperRepository = fakePaperRepo,
+      ocrRepository = null,
+      evaluationHttpClient = evalHttpClient,
+      existingEvaluationDbFetcher = { paperId ->
+        dbEvalByPaperId[paperId]
+      },
+      evaluationAccessTokenProvider = { "test-eval-jwt-token" },
+    )
+
+    // -------------------------------------------------------------------------
+    // 1. Opening an approved paper in Teacher Review while the paper list is still loading:
+    //    ensureEvaluationLoadedForReview must wait for paper list load to finish and then
+    //    open the approved evaluation without triggering an AI evaluation call.
+    // -------------------------------------------------------------------------
+    val approvedPaper1 = StudentPaper(
+      id = "paper-approved-1",
+      studentId = "student-race-1",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      totalPages = 1,
+      status = "approved",
+      evaluation = EvaluationStatus(status = "approved"),
+    )
+    dbEvalByPaperId["paper-approved-1"] = com.example.data.model.EvaluationDbRecord(
+      id = "eval-approved-1",
+      paperId = "paper-approved-1",
+      studentId = "student-race-1",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      status = "approved",
+      totalMarksObtained = 19.0,
+      totalMarks = 20.0,
+      percentage = 95.0,
+      reviewRequired = false,
+    ) to listOf(
+      com.example.data.model.QuestionDbRecord(
+        id = "q-approved-1",
+        evaluationId = "eval-approved-1",
+        questionNumber = "1",
+        questionText = "Define velocity.",
+        maximumMarks = 20.0,
+        studentAnswer = "Rate of change of displacement.",
+        expectedAnswer = "Displacement per unit time.",
+        awardedMarks = 19.0,
+        feedback = "Well stated.",
+        reviewRequired = false,
+      )
+    )
+
+    // Initial TeacherReviewScreen entry triggers ensureEvaluationLoadedForReview while student/papers are not loaded yet
+    viewModel.ensureEvaluationLoadedForReview(studentId = "student-race-1", paperId = "paper-approved-1")
+    waitForCondition { viewModel.uiState.value.isLoading }
+
+    // Calling ensureEvaluationLoadedForReview again while still loading must NOT start AI evaluation
+    viewModel.ensureEvaluationLoadedForReview(studentId = "student-race-1", paperId = "paper-approved-1")
+    assertNull(viewModel.uiState.value.isEvaluatingPaperId)
+    assertEquals(0, edgeFunctionCallPaperIds.size)
+
+    // Complete the paper list load; simulate TeacherReviewScreen LaunchedEffect re-running on state update
+    student1PapersDeferred.complete(Result.success(listOf(approvedPaper1)))
+    waitForCondition { !viewModel.uiState.value.isLoading && viewModel.uiState.value.papers.size == 1 }
+
+    viewModel.ensureEvaluationLoadedForReview(studentId = "student-race-1", paperId = "paper-approved-1")
+    waitForCondition {
+      viewModel.uiState.value.isEvaluatingPaperId == null &&
+        viewModel.uiState.value.evaluatedPaperId == "paper-approved-1" &&
+        viewModel.uiState.value.evaluationResult != null
+    }
+    assertEquals(0, edgeFunctionCallPaperIds.size)
+    assertEquals("approved", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals(19.0, viewModel.uiState.value.evaluationResult?.evaluation?.totalMarksObtained)
+
+    // Also verify direct runAiEvaluation while paper list is loading for an approved paper whose DB record
+    // is temporarily missing (NotFound): it waits for loadJob, sees the paper is approved, and refuses to call AI.
+    student1PapersDeferred = kotlinx.coroutines.CompletableDeferred()
+    val approvedPaperMissingDb = StudentPaper(
+      id = "paper-approved-missing-db",
+      studentId = "student-race-1",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      totalPages = 1,
+      status = "approved",
+      evaluation = EvaluationStatus(status = "approved"),
+    )
+    dbEvalByPaperId["paper-approved-missing-db"] = null
+
+    viewModel.loadStudentAndPapers("student-race-1")
+    waitForCondition { viewModel.uiState.value.isLoading }
+    viewModel.runAiEvaluation("paper-approved-missing-db")
+    // Complete paper load so runAiEvaluation can inspect the loaded paper status
+    student1PapersDeferred.complete(Result.success(listOf(approvedPaperMissingDb)))
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null }
+
+    assertEquals(0, edgeFunctionCallPaperIds.size)
+    assertNull(viewModel.uiState.value.evaluationResult)
+    assertEquals(
+      "Unable to load the saved approved evaluation.",
+      viewModel.uiState.value.evaluationError,
+    )
+
+    // -------------------------------------------------------------------------
+    // 2. Reusing an existing needs_review / completed evaluation without an unnecessary AI request:
+    // -------------------------------------------------------------------------
+    val needsReviewPaper = StudentPaper(
+      id = "paper-needs-review-1",
+      studentId = "student-race-1",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      totalPages = 1,
+      status = "needs_review",
+      evaluation = EvaluationStatus(status = "needs_review"),
+    )
+    dbEvalByPaperId["paper-needs-review-1"] = com.example.data.model.EvaluationDbRecord(
+      id = "eval-needs-review-1",
+      paperId = "paper-needs-review-1",
+      studentId = "student-race-1",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      status = "needs_review",
+      totalMarksObtained = 14.0,
+      totalMarks = 20.0,
+      percentage = 70.0,
+      reviewRequired = true,
+    ) to listOf(
+      com.example.data.model.QuestionDbRecord(
+        id = "q-nr-1",
+        evaluationId = "eval-needs-review-1",
+        questionNumber = "1",
+        questionText = "Explain inertia.",
+        maximumMarks = 20.0,
+        studentAnswer = "Resistance to change in motion.",
+        expectedAnswer = "Tendency of an object to resist changes in its state of motion.",
+        awardedMarks = 14.0,
+        feedback = "Needs teacher confirmation.",
+        reviewRequired = true,
+      )
+    )
+
+    student1PapersDeferred = kotlinx.coroutines.CompletableDeferred()
+    viewModel.loadStudentAndPapers("student-race-1")
+    waitForCondition { viewModel.uiState.value.isLoading }
+    student1PapersDeferred.complete(Result.success(listOf(needsReviewPaper)))
+    waitForCondition { !viewModel.uiState.value.isLoading && viewModel.uiState.value.papers.any { it.id == "paper-needs-review-1" } }
+
+    viewModel.ensureEvaluationLoadedForReview(studentId = "student-race-1", paperId = "paper-needs-review-1")
+    waitForCondition {
+      viewModel.uiState.value.isEvaluatingPaperId == null &&
+        viewModel.uiState.value.evaluatedPaperId == "paper-needs-review-1" &&
+        viewModel.uiState.value.evaluationResult != null
+    }
+    assertEquals(0, edgeFunctionCallPaperIds.size)
+    assertEquals("needs_review", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals(14.0, viewModel.uiState.value.evaluationResult?.evaluation?.totalMarksObtained)
+
+    // -------------------------------------------------------------------------
+    // 3. Starting evaluation for a genuinely new paper:
+    // -------------------------------------------------------------------------
+    val brandNewPaper = StudentPaper(
+      id = "paper-new-1",
+      studentId = "student-race-1",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      totalPages = 1,
+      status = "scanned",
+      evaluation = null,
+    )
+    dbEvalByPaperId["paper-new-1"] = null
+
+    student1PapersDeferred = kotlinx.coroutines.CompletableDeferred()
+    viewModel.loadStudentAndPapers("student-race-1")
+    waitForCondition { viewModel.uiState.value.isLoading }
+
+    // While still loading, ensureEvaluationLoadedForReview waits
+    viewModel.ensureEvaluationLoadedForReview(studentId = "student-race-1", paperId = "paper-new-1")
+    assertEquals(0, edgeFunctionCallPaperIds.size)
+
+    student1PapersDeferred.complete(Result.success(listOf(brandNewPaper)))
+    waitForCondition { !viewModel.uiState.value.isLoading && viewModel.uiState.value.papers.any { it.id == "paper-new-1" } }
+
+    // Once loaded, ensureEvaluationLoadedForReview runs AI evaluation for the genuinely new paper
+    viewModel.ensureEvaluationLoadedForReview(studentId = "student-race-1", paperId = "paper-new-1")
+    waitForCondition {
+      viewModel.uiState.value.isEvaluatingPaperId == null &&
+        viewModel.uiState.value.evaluatedPaperId == "paper-new-1" &&
+        viewModel.uiState.value.evaluationResult != null
+    }
+    assertEquals(listOf("paper-new-1"), edgeFunctionCallPaperIds.toList())
+    assertEquals("completed", viewModel.uiState.value.evaluationResult?.evaluation?.status)
+    assertEquals(18.0, viewModel.uiState.value.evaluationResult?.evaluation?.totalMarksObtained)
+
+    // -------------------------------------------------------------------------
+    // 4. Preventing stale loading results from triggering evaluation for the wrong paper:
+    // -------------------------------------------------------------------------
+    edgeFunctionCallPaperIds.clear()
+    student1PapersDeferred = kotlinx.coroutines.CompletableDeferred()
+    student2PapersDeferred = kotlinx.coroutines.CompletableDeferred()
+
+    val staleStudent1Paper = StudentPaper(
+      id = "paper-stale-s1",
+      studentId = "student-race-1",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      totalPages = 1,
+      status = "scanned",
+      evaluation = null,
+    )
+    val activeStudent2Paper = StudentPaper(
+      id = "paper-active-s2",
+      studentId = "student-race-2",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      totalPages = 1,
+      status = "approved",
+      evaluation = EvaluationStatus(status = "approved"),
+    )
+    dbEvalByPaperId["paper-stale-s1"] = null
+    dbEvalByPaperId["paper-active-s2"] = com.example.data.model.EvaluationDbRecord(
+      id = "eval-s2",
+      paperId = "paper-active-s2",
+      studentId = "student-race-2",
+      classId = "class-race-1",
+      teacherId = "teacher-1",
+      status = "approved",
+      totalMarksObtained = 20.0,
+      totalMarks = 20.0,
+      percentage = 100.0,
+      reviewRequired = false,
+    ) to emptyList()
+
+    // Start loading student-race-1, then immediately switch to student-race-2 before student-race-1 finishes
+    viewModel.loadStudentAndPapers("student-race-1")
+    viewModel.loadStudentAndPapers("student-race-2")
+
+    // Complete stale student-race-1 first, then active student-race-2
+    student1PapersDeferred.complete(Result.success(listOf(staleStudent1Paper)))
+    student2PapersDeferred.complete(Result.success(listOf(activeStudent2Paper)))
+
+    waitForCondition {
+      !viewModel.uiState.value.isLoading &&
+        viewModel.uiState.value.student?.id == "student-race-2" &&
+        viewModel.uiState.value.papers.map { it.id } == listOf("paper-active-s2")
+    }
+
+    // Attempting to review or evaluate staleStudent1Paper under student-race-2 must NOT call AI
+    viewModel.ensureEvaluationLoadedForReview(studentId = "student-race-2", paperId = "paper-stale-s1")
+    assertEquals(0, edgeFunctionCallPaperIds.size)
+
+    viewModel.runAiEvaluation("paper-stale-s1")
+    waitForCondition { viewModel.uiState.value.isEvaluatingPaperId == null }
+    assertEquals(0, edgeFunctionCallPaperIds.size)
+    assertEquals("Selected paper could not be found.", viewModel.uiState.value.evaluationError)
+  }
+
+  @Test
+  fun `verify homeDashboardClassCount single count query eliminates per-exam loop handles zero counts and errors`() = runTest {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    val exam1 = Exam(id = "exam-1", teacherId = "teacher-1", name = "Math Midterm", type = "Mid Term", date = "2026-10-01")
+    val exam2 = Exam(id = "exam-2", teacherId = "teacher-1", name = "Physics Quiz", type = "Quiz", date = "2026-10-02")
+    val exam3 = Exam(id = "exam-3", teacherId = "teacher-1", name = "Chemistry Final", type = "Final", date = "2026-10-03")
+
+    val class1 = ClassRoom(id = "class-1", examId = "exam-1", teacherId = "teacher-1", session = "2026", semester = "Fall", timing = "Morning", subjectName = "Math 101", totalMarks = 100)
+    val class2 = ClassRoom(id = "class-2", examId = "exam-1", teacherId = "teacher-1", session = "2026", semester = "Fall", timing = "Evening", subjectName = "Math 102", totalMarks = 100)
+    val class3 = ClassRoom(id = "class-3", examId = "exam-2", teacherId = "teacher-1", session = "2026", semester = "Fall", timing = "Morning", subjectName = "Physics 101", totalMarks = 100)
+    val class4 = ClassRoom(id = "class-4", examId = "exam-3", teacherId = "teacher-1", session = "2026", semester = "Fall", timing = "Morning", subjectName = "Chem 101", totalMarks = 100)
+    val class5 = ClassRoom(id = "class-5", examId = "exam-3", teacherId = "teacher-1", session = "2026", semester = "Fall", timing = "Evening", subjectName = "Chem 102", totalMarks = 100)
+
+    val fakeAuthRepo = FakeAuthRepository(signedInUser = "teacher@school.edu", customUserId = "teacher-1")
+    val fakeExamRepo = FakeExamRepository(initialExams = listOf(exam1, exam2, exam3))
+    val fakeClassRepo = FakeClassRepository(initialClasses = listOf(class1, class2, class3, class4, class5))
+
+    // 1. Multiple exams and classes: loads with a single count query, 0 per-exam queries
+    val homeViewModel = HomeViewModel(fakeAuthRepo, fakeExamRepo, fakeClassRepo)
+    mainLooper.idle()
+
+    assertFalse(homeViewModel.uiState.value.isLoading)
+    assertNull(homeViewModel.uiState.value.errorMessage)
+    assertEquals(3, homeViewModel.uiState.value.examCount)
+    assertEquals(5, homeViewModel.uiState.value.classCount)
+    assertEquals(1, fakeExamRepo.getExamsCallCount)
+    assertEquals(1, fakeClassRepo.getClassCountCallCount)
+    assertEquals(0, fakeClassRepo.getClassesCallCount) // ZERO per-exam calls!
+
+    // 2. Zero classes with existing exams
+    val fakeClassRepoEmpty = FakeClassRepository(initialClasses = emptyList())
+    val homeViewModelEmptyClasses = HomeViewModel(fakeAuthRepo, fakeExamRepo, fakeClassRepoEmpty)
+    mainLooper.idle()
+
+    assertFalse(homeViewModelEmptyClasses.uiState.value.isLoading)
+    assertNull(homeViewModelEmptyClasses.uiState.value.errorMessage)
+    assertEquals(3, homeViewModelEmptyClasses.uiState.value.examCount)
+    assertEquals(0, homeViewModelEmptyClasses.uiState.value.classCount)
+    assertEquals(1, fakeClassRepoEmpty.getClassCountCallCount)
+    assertEquals(0, fakeClassRepoEmpty.getClassesCallCount)
+
+    // 3. Zero exams and zero classes
+    val fakeExamRepoEmpty = FakeExamRepository(initialExams = emptyList())
+    val homeViewModelEmptyAll = HomeViewModel(fakeAuthRepo, fakeExamRepoEmpty, fakeClassRepoEmpty)
+    mainLooper.idle()
+
+    assertFalse(homeViewModelEmptyAll.uiState.value.isLoading)
+    assertNull(homeViewModelEmptyAll.uiState.value.errorMessage)
+    assertEquals(0, homeViewModelEmptyAll.uiState.value.examCount)
+    assertEquals(0, homeViewModelEmptyAll.uiState.value.classCount)
+
+    // 4. Zero exams with non-empty classes in db: exam list empty guarantees classCount = 0
+    val homeViewModelZeroExamsNonEmptyClasses = HomeViewModel(fakeAuthRepo, fakeExamRepoEmpty, fakeClassRepo)
+    mainLooper.idle()
+
+    assertFalse(homeViewModelZeroExamsNonEmptyClasses.uiState.value.isLoading)
+    assertNull(homeViewModelZeroExamsNonEmptyClasses.uiState.value.errorMessage)
+    assertEquals(0, homeViewModelZeroExamsNonEmptyClasses.uiState.value.examCount)
+    assertEquals(0, homeViewModelZeroExamsNonEmptyClasses.uiState.value.classCount)
+
+    // 5. Class count query failure: reports error gracefully, retains examCount
+    val fakeClassRepoFailing = FakeClassRepository(initialClasses = listOf(class1, class2))
+    fakeClassRepoFailing.shouldFail = true
+    val homeViewModelFailingClass = HomeViewModel(fakeAuthRepo, fakeExamRepo, fakeClassRepoFailing)
+    mainLooper.idle()
+
+    assertFalse(homeViewModelFailingClass.uiState.value.isLoading)
+    assertNull(homeViewModelFailingClass.uiState.value.errorMessage)
+    assertEquals(3, homeViewModelFailingClass.uiState.value.examCount)
+    assertEquals(0, homeViewModelFailingClass.uiState.value.classCount)
+
+    // 6. Suspended request cancellation & account switching
+    val deferredExams = kotlinx.coroutines.CompletableDeferred<Result<List<Exam>>>()
+    val deferredClassCount = kotlinx.coroutines.CompletableDeferred<Result<Int>>()
+    val fakeExamRepoSuspended = FakeExamRepository(initialExams = listOf(exam1), deferredExamsResult = deferredExams)
+    val fakeClassRepoSuspended = FakeClassRepository(initialClasses = listOf(class1))
+    fakeClassRepoSuspended.deferredClassCountResult = deferredClassCount
+
+    val homeViewModelSuspended = HomeViewModel(fakeAuthRepo, fakeExamRepoSuspended, fakeClassRepoSuspended)
+    mainLooper.idle()
+    assertTrue(homeViewModelSuspended.uiState.value.isLoading)
+    assertEquals(1, fakeExamRepoSuspended.getExamsCallCount)
+    assertEquals(1, fakeClassRepoSuspended.getClassCountCallCount)
+
+    // Deduplication while in-flight
+    homeViewModelSuspended.loadUserData(forceRefresh = false)
+    mainLooper.idle()
+    assertEquals(1, fakeExamRepoSuspended.getExamsCallCount)
+    assertEquals(1, fakeClassRepoSuspended.getClassCountCallCount)
+
+    // Switch account before completing
+    fakeAuthRepo.customUserId = "other-teacher"
+    deferredExams.complete(Result.success(listOf(exam1)))
+    deferredClassCount.complete(Result.success(1))
+    mainLooper.idle()
+
+    assertFalse(homeViewModelSuspended.uiState.value.isLoading)
+    // Stale result discarded because account switched
+    assertEquals(0, homeViewModelSuspended.uiState.value.examCount)
+    assertEquals(0, homeViewModelSuspended.uiState.value.classCount)
+  }
+
+  @Test
+  fun `verify ClassViewModel loadClasses handles exam switching late responses deduplication cancellation and errors`() = runTest {
+    val mainLooper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    val classA1 = ClassRoom(id = "class-A1", examId = "exam-A", teacherId = "teacher-1", session = "2026", semester = "Fall", timing = "Morning", subjectName = "Algebra", totalMarks = 100)
+    val classB1 = ClassRoom(id = "class-B1", examId = "exam-B", teacherId = "teacher-1", session = "2026", semester = "Fall", timing = "Morning", subjectName = "Biology", totalMarks = 100)
+    val classB2 = ClassRoom(id = "class-B2", examId = "exam-B", teacherId = "teacher-1", session = "2026", semester = "Fall", timing = "Evening", subjectName = "Biochemistry", totalMarks = 100)
+
+    val fakeClassRepo = FakeClassRepository(initialClasses = listOf(classA1, classB1, classB2))
+    fakeClassRepo.ignoreCancellationOnDeferred = true // Simulate delayed completion after job cancellation
+    val classViewModel = ClassViewModel(fakeClassRepo)
+
+    val deferredA = kotlinx.coroutines.CompletableDeferred<Result<List<ClassRoom>>>()
+    val deferredB = kotlinx.coroutines.CompletableDeferred<Result<List<ClassRoom>>>()
+    fakeClassRepo.deferredClassesByExamId["exam-A"] = deferredA
+    fakeClassRepo.deferredClassesByExamId["exam-B"] = deferredB
+
+    // 1. Initial request for Exam A suspends on deferredA
+    classViewModel.loadClasses("exam-A")
+    mainLooper.idle()
+    assertTrue(classViewModel.uiState.value.isLoading)
+    assertEquals("exam-A", classViewModel.uiState.value.activeExamId)
+    assertEquals(1, fakeClassRepo.getClassesCallCount)
+
+    // 2. Duplicate in-flight request for Exam A without forceRefresh is deduplicated
+    classViewModel.loadClasses("exam-A", forceRefresh = false)
+    mainLooper.idle()
+    assertEquals(1, fakeClassRepo.getClassesCallCount) // Call count did not increase!
+
+    // 3. Teacher switches quickly to Exam B while Exam A is still suspended
+    classViewModel.loadClasses("exam-B")
+    mainLooper.idle()
+    assertTrue(classViewModel.uiState.value.isLoading)
+    assertEquals("exam-B", classViewModel.uiState.value.activeExamId)
+    assertTrue(classViewModel.uiState.value.classes.isEmpty()) // Switching exams clears obsolete class list
+    assertEquals(2, fakeClassRepo.getClassesCallCount)
+
+    // 4. Exam B completes successfully first
+    deferredB.complete(Result.success(listOf(classB1, classB2)))
+    mainLooper.idle()
+    assertFalse(classViewModel.uiState.value.isLoading)
+    assertNull(classViewModel.uiState.value.errorMessage)
+    assertEquals("exam-B", classViewModel.uiState.value.activeExamId)
+    assertEquals(2, classViewModel.uiState.value.classes.size)
+    assertEquals(listOf("class-B1", "class-B2"), classViewModel.uiState.value.classes.map { it.id })
+
+    // 5. Exam A completes LATE after Exam B — its obsolete response must NOT overwrite Exam B's state
+    deferredA.complete(Result.success(listOf(classA1)))
+    mainLooper.idle()
+    assertFalse(classViewModel.uiState.value.isLoading)
+    assertNull(classViewModel.uiState.value.errorMessage)
+    assertEquals("exam-B", classViewModel.uiState.value.activeExamId)
+    assertEquals(2, classViewModel.uiState.value.classes.size) // Still Exam B's classes!
+    assertEquals(listOf("class-B1", "class-B2"), classViewModel.uiState.value.classes.map { it.id })
+
+    // 6. Force refresh on Exam B while idle starts a new load
+    fakeClassRepo.deferredClassesByExamId.remove("exam-B")
+    val deferredBRefresh = kotlinx.coroutines.CompletableDeferred<Result<List<ClassRoom>>>()
+    fakeClassRepo.deferredClassesByExamId["exam-B"] = deferredBRefresh
+    classViewModel.loadClasses("exam-B", forceRefresh = true)
+    mainLooper.idle()
+    assertTrue(classViewModel.uiState.value.isLoading)
+    assertEquals(3, fakeClassRepo.getClassesCallCount)
+
+    // Starting another forceRefresh cancels the previous one
+    val deferredBRefresh2 = kotlinx.coroutines.CompletableDeferred<Result<List<ClassRoom>>>()
+    fakeClassRepo.deferredClassesByExamId["exam-B"] = deferredBRefresh2
+    classViewModel.loadClasses("exam-B", forceRefresh = true)
+    mainLooper.idle()
+    assertEquals(4, fakeClassRepo.getClassesCallCount)
+
+    deferredBRefresh2.complete(Result.success(listOf(classB1)))
+    mainLooper.idle()
+    assertFalse(classViewModel.uiState.value.isLoading)
+    assertEquals(1, classViewModel.uiState.value.classes.size)
+
+    // 7. Genuine repository failure reports error and does NOT leave screen permanently loading
+    fakeClassRepo.deferredClassesByExamId.clear()
+    fakeClassRepo.shouldFail = true
+    classViewModel.loadClasses("exam-C", forceRefresh = true)
+    mainLooper.idle()
+    assertFalse(classViewModel.uiState.value.isLoading)
+    assertEquals("Failed to fetch classes", classViewModel.uiState.value.errorMessage)
+    assertEquals("exam-C", classViewModel.uiState.value.activeExamId)
+
+    // 8. CancellationException does NOT display as an ordinary error message
+    fakeClassRepo.shouldFail = false
+    fakeClassRepo.throwCancellation = true
+    classViewModel.loadClasses("exam-D", forceRefresh = true)
+    mainLooper.idle()
+    assertFalse(classViewModel.uiState.value.isLoading)
+    assertNull(classViewModel.uiState.value.errorMessage)
+
+    // 9. Retry after cancellation recovers cleanly
+    fakeClassRepo.throwCancellation = false
+    classViewModel.loadClasses("exam-B", forceRefresh = true)
+    mainLooper.idle()
+    assertFalse(classViewModel.uiState.value.isLoading)
+    assertNull(classViewModel.uiState.value.errorMessage)
+    assertEquals(2, classViewModel.uiState.value.classes.size)
+  }
 }
+
+
+
 
 
